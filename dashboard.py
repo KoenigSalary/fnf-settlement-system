@@ -807,39 +807,53 @@ def fnf_settlement_form():
         st.error("Could not load employee data")
         return
     
-    # Step 1: Employee Selection
+    # Step 1: Enhanced Employee Selection with Dropdown
     st.subheader("🔍 Step 1: Select Employee")
+    
+    # Create dropdown options from employee data
+    employee_options = [""] + [f"{int(row['Employee ID'])} - {row['Employee Name']}" 
+                              for _, row in employee_df.iterrows()]
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        employee_id = st.number_input("Enter Employee ID", min_value=1, step=1, key="emp_id")
-    
+        selected_option = st.selectbox(
+            "Select Employee",
+            employee_options,
+            index=0,
+            help="Choose employee from dropdown"
+        )
+
     with col2:
-        if employee_id:
-            employee = get_employee_by_id(employee_id, employee_df)
-            if employee is not None:
-                st.success(f"✅ Employee Found: {employee['Employee Name']}")
-            else:
-                st.error("❌ Employee not found")
-                return
+        if selected_option:
+            st.success(f"✅ Selected: {selected_option}")
     
-    if employee_id and employee is not None:
-        # Display Employee Details
-        st.subheader("👤 Employee Details (Auto-filled)")
-        col1, col2, col3 = st.columns(3)
+    # Process selection and continue with form
+    if selected_option:
+        employee_id = int(selected_option.split(" - ")[0])
+        employee = get_employee_by_id(employee_id, employee_df)
         
-        with col1:
-            st.info(f"**Employee ID:** {employee['Employee ID']}")
-            st.info(f"**Employee Name:** {employee['Employee Name']}")
-        
-        with col2:
-            st.info(f"**Designation:** {employee['Designation']}")
-            st.info(f"**Base Location:** {employee['BaseLocation']}")
-        
-        with col3:
-            st.info(f"**DOJ:** {employee['Date of Joining']}")
-            st.info(f"**PAN No:** {employee['PAN No.']}")
-        
+        if employee is not None:
+            # Get employee salary and EPF amount
+            employee_base_salary = float(employee['Salary'])
+            employee_epf_amount = float(employee.get('EPF Amount', 1800))
+            
+            # Display Employee Details
+            st.subheader("👤 Employee Details (Auto-filled)")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.info(f"**Employee ID:** {int(employee['Employee ID'])}")
+                st.info(f"**Employee Name:** {employee['Employee Name']}")
+            
+            with col2:
+                st.info(f"**Designation:** {employee['Designation']}")
+                st.info(f"**Base Location:** {employee['BaseLocation']}")
+            
+            with col3:
+                st.info(f"**DOJ:** {employee['Date of Joining']}")
+                st.info(f"**Monthly Salary:** ₹{employee_base_salary:,.0f}")
+                st.info(f"**EPF Amount:** ₹{employee_epf_amount:,.0f}")
+            
         # Step 2: Tax Regime Selection (moved up to control visibility)
         st.subheader("🏛️ Step 2: Select Tax Regime")
         tax_regime = st.selectbox("Tax Regime", ["Old Tax Regime", "New Tax Regime"])
