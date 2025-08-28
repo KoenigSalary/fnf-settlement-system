@@ -127,64 +127,97 @@ def add_sidebar_logo():
                     del st.session_state[key]
                 st.rerun()
 
-# Modified Google Sheets function
-@st.cache_data(ttl=300)
+Copy@st.cache_data(ttl=300)
 def load_employee_data():
     """Load employee data from Google Sheets or demo data"""
     if not GOOGLE_SHEETS_AVAILABLE:
         return get_demo_employee_data()
     
-    # Check if credentials file exists
-    credential_paths = [
-        'credentials.json',
-        '/Users/praveenchaudhary/Dowloads/FNF/credentials.json',
-        os.path.join(os.getcwd(), 'credentials.json')
-    ]
-    
-    SERVICE_ACCOUNT_FILE = None
-    for path in credential_paths:
-        if os.path.exists(path):
-            SERVICE_ACCOUNT_FILE = path
-            break
-    
-    if not SERVICE_ACCOUNT_FILE:
-        st.warning("Google Sheets credentials not found. Using demo data.")
-        return get_demo_employee_data()
-    
-    SCOPES = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    
     try:
-        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        gc = gspread.authorize(creds)
+        creds = None
         
-        spreadsheet = gc.open("FNF Calculation")
-        worksheet = spreadsheet.worksheet("Employee Master")
-        data = worksheet.get_all_records()
+        # Try Streamlit secrets first (for Streamlit Cloud)
+        try:
+            if hasattr(st, 'secrets') and "gcp_service_account" in st.secrets:
+                print("✅ Using Streamlit Cloud secrets")
+                creds = Credentials.from_service_account_info(
+                    st.secrets["gcp_service_account"],
+                    scopes=[
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/drive"
+                    ]
+                )
+        except Exception as e:
+            print(f"Streamlit secrets not available: {e}")
         
-        if data:
-            df = pd.DataFrame(data)
-            df = df[df['Employee ID'] != 0]
-            df = df[df['Employee ID'] != '']
-            df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
-            df = df.dropna(subset=['Salary'])
+        # Fallback to local credentials file (for local development)
+        if creds is None:
+            credential_paths = [
+                'credentials.json',
+                '/Users/praveenchaudhary/Desktop/fnf-settlement-system-v2/credentials.json',
+                os.path.join(os.getcwd(), 'credentials.json')
+            ]
             
-            # Clean text columns
-            text_columns = ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']
-            for col in text_columns:
-                if col in df.columns:
-                    df[col] = df[col].fillna('').astype(str)
+            SERVICE_ACCOUNT_FILE = None
+            for path in credential_paths:
+                if os.path.exists(path):
+                    SERVICE_ACCOUNT_FILE = path
+                    print(f"✅ Found local credentials: {path}")
+                    break
             
-            return df
+            if SERVICE_ACCOUNT_FILE:
+                creds = Credentials.from_service_account_file(
+                    SERVICE_ACCOUNT_FILE, 
+                    scopes=[
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/drive"
+                    ]
+                )
+        
+        # If we have credentials, try to connect
+        if creds:
+            gc = gspread.authorize(creds)
+            spreadsheet = gc.open("FNF Calculation")
+            worksheet = spreadsheet.worksheet("Employee Master")
+            data = worksheet.get_all_records()
+            
+            if data:
+                df = pd.DataFrame(data)
+                # Remove empty rows
+                df = df[df['Employee ID'].astype(str) != '']
+                df = df[df['Employee ID'].astype(str) != '0']
+                
+                # Convert Employee ID to numeric
+                df['Employee ID'] = pd.to_numeric(df['Employee ID'], errors='coerce')
+                df = df.dropna(subset=['Employee ID'])
+                
+                # Convert Salary to numeric
+                df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
+                df = df.dropna(subset=['Salary'])
+                
+                # Clean text columns
+                text_columns = ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']
+                for col in text_columns:
+                    if col in df.columns:
+                        df[col] = df[col].fillna('').astype(str)
+                
+                print(f"✅ Loaded {len(df)} employees from Google Sheets")
+                return df
+            else:
+                print("No data found in Google Sheets")
         else:
-            return get_demo_employee_data()
+            print("No valid credentials found")
+        
+        # Fall back to demo data
+        print("Using demo data")
+        return get_demo_employee_data()
             
     except Exception as e:
+        print(f"Google Sheets error: {e}")
         st.warning(f"Could not connect to Google Sheets: {e}. Using demo data.")
         return get_demo_employee_data()
 
+Step 2: Test Locally (Should Work with Demo Data)
 def get_employee_by_id(employee_id, df):
     """Get employee details by ID"""
     employee = df[df['Employee ID'] == int(employee_id)]
