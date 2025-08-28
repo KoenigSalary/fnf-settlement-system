@@ -303,11 +303,26 @@ def calculate_tds_new_regime(annual_taxable_income):
     return tax_with_cess
 
 def calculate_years_of_service(doj_str, last_working_day):
-    """Calculate years of service from DOJ to last working day"""
+    """Calculate years of service from DOJ to last working day - Enhanced date parsing"""
     try:
-        # Parse DOJ (assuming format like "01/01/93" or "01/01/1993")
+        # Parse DOJ with better handling for 2-digit years
         if len(doj_str.split('/')[2]) == 2:  # Two digit year
-            doj = datetime.strptime(doj_str, '%d/%m/%y')
+            year_part = int(doj_str.split('/')[2])
+            # Smart year interpretation: if year > 50, assume 19xx, else 20xx
+            if year_part > 50:
+                # Convert to 19xx (50-99 = 1950-1999)
+                full_year = 1900 + year_part
+            else:
+                # Convert to 20xx (00-50 = 2000-2050)
+                full_year = 2000 + year_part
+            
+            # Reconstruct date string with 4-digit year
+            day, month, _ = doj_str.split('/')
+            doj_str_full = f"{day}/{month}/{full_year}"
+            doj = datetime.strptime(doj_str_full, '%d/%m/%Y')
+            
+            print(f"Converted DOJ: {doj_str} -> {doj_str_full} -> {doj.strftime('%d/%m/%Y')}")
+            
         else:  # Four digit year
             doj = datetime.strptime(doj_str, '%d/%m/%Y')
         
@@ -323,11 +338,15 @@ def calculate_years_of_service(doj_str, last_working_day):
         # Convert to years (including months and days as decimal)
         years = diff.years + (diff.months / 12) + (diff.days / 365)
         
+        print(f"Service calculation: {doj.strftime('%d/%m/%Y')} to {lwd.strftime('%d/%m/%Y')} = {years:.2f} years")
+        
         return years
+        
     except Exception as e:
         st.error(f"Error calculating service years: {e}")
+        print(f"Date parsing error: DOJ='{doj_str}', LWD='{last_working_day}', Error: {e}")
         return 0
-
+        
 def calculate_gratuity(tenure_years, last_basic_salary):
     """
     Calculate Gratuity using company formula
@@ -853,10 +872,45 @@ def fnf_settlement_form():
                 last_working_day = st.date_input("Last Working Day", value=date.today())
                 
                 st.write("**💰 Additional Components**")
-                gratuity = st.number_input("Gratuity (₹)", value=0.0, min_value=0.0)
+                
+                # Enhanced Gratuity Calculation
+                years_of_service = calculate_years_of_service(employee['Date of Joining'], last_working_day)
+                
+                # Calculate last basic salary (average from active months if available)
+                if active_months:
+                    total_basic = sum(month_data['prorated_basic'] for month_data in active_months.values())
+                    last_basic_salary = total_basic / len(active_months)
+                else:
+                    last_basic_salary = employee_base_salary / 3  # Default basic calculation
+                
+                # Auto-calculate gratuity
+                calculated_gratuity = calculate_gratuity(years_of_service, last_basic_salary)
+                
+                # Gratuity input with auto-calculation
+                col_grat1, col_grat2 = st.columns([1, 1])
+                with col_grat1:
+                    st.info(f"**Gratuity Calculation:**")
+                    st.write(f"• Years of Service: {years_of_service:.2f}")
+                    st.write(f"• Last Basic: ₹{last_basic_salary:,.0f}")
+                    if years_of_service < 5:
+                        st.warning("⚠️ Less than 5 years - No gratuity")
+                    else:
+                        st.success(f"✅ Calculated: ₹{calculated_gratuity:,.0f}")
+                
+                with col_grat2:
+                    gratuity = st.number_input(
+                        "Gratuity (₹)", 
+                        value=calculated_gratuity, 
+                        min_value=0.0,
+                        help=f"Auto-calculated: {years_of_service:.1f} years"
+                    )
+                    
+                    if abs(gratuity - calculated_gratuity) > 100:
+                        st.warning(f"⚠️ Manual override!")
+                
                 bonus = st.number_input("Bonus (₹)", value=0.0, min_value=0.0)
                 leave_encashment = st.number_input("Leave Encashment (₹)", value=0.0, min_value=0.0)
-            
+
             with col2:
                 st.write("**📉 Additional Deductions**")
                 
@@ -897,6 +951,19 @@ def fnf_settlement_form():
                 'other_deductions': other_deductions,
                 'investments_data': investments_data
             }
+
+            # Temporary debug section - add this after employee details display
+            if st.checkbox("🔧 Debug DOJ & Gratuity"):
+                st.write("**Debug Information:**")
+                st.write(f"Original DOJ: {employee['Date of Joining']}")
+                
+                test_lwd = date.today()
+                years_calc = calculate_years_of_service(employee['Date of Joining'], test_lwd)
+                st.write(f"Calculated Years: {years_calc:.2f}")
+                
+                test_basic = employee_base_salary / 3
+                test_gratuity = calculate_gratuity(years_calc, test_basic)
+                st.write(f"Test Gratuity: ₹{test_gratuity:,.2f}")
         
         # Show calculation results and action buttons (outside the form)
         if st.session_state.get('calculation_done', False):
