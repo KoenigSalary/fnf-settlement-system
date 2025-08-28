@@ -62,7 +62,8 @@ def get_demo_employee_data():
         'BaseLocation': ['Bangalore', 'Chennai', 'Mumbai', 'Delhi', 'Pune'],
         'Date of Joining': ['01/01/2020', '15/03/2019', '10/06/2018', '20/09/2017', '05/12/2021'],
         'PAN No.': ['ABCDE1234F', 'FGHIJ5678K', 'KLMNO9012P', 'PQRST3456U', 'UVWXY7890Z'],
-        'Salary': [80000, 120000, 150000, 90000, 110000]
+        'Salary': [80000, 120000, 150000, 90000, 110000],
+        'EPF Amount': [1800, 1800, 1800, 0, 2000]  # Added EPF Amount column
     }
     return pd.DataFrame(demo_data)
 
@@ -195,6 +196,12 @@ def load_employee_data():
                 df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
                 df = df.dropna(subset=['Salary'])
                 
+                # Convert EPF Amount to numeric (with default)
+                if 'EPF Amount' in df.columns:
+                    df['EPF Amount'] = pd.to_numeric(df['EPF Amount'], errors='coerce').fillna(1800)
+                else:
+                    df['EPF Amount'] = 1800
+                
                 # Clean text columns
                 text_columns = ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']
                 for col in text_columns:
@@ -218,8 +225,9 @@ def load_employee_data():
         return get_demo_employee_data()
 
 def get_employee_by_id(employee_id, df):
-    """Get employee details by ID"""
-    employee = df[df['Employee ID'] == int(employee_id)]
+    """Get employee details by ID - Fixed to handle int properly"""
+    employee_id = int(float(employee_id))  # Convert to int, removing decimal
+    employee = df[df['Employee ID'] == employee_id]
     if not employee.empty:
         return employee.iloc[0]
     return None
@@ -303,26 +311,11 @@ def calculate_tds_new_regime(annual_taxable_income):
     return tax_with_cess
 
 def calculate_years_of_service(doj_str, last_working_day):
-    """Calculate years of service from DOJ to last working day - Enhanced date parsing"""
+    """Calculate years of service from DOJ to last working day"""
     try:
-        # Parse DOJ with better handling for 2-digit years
+        # Parse DOJ (assuming format like "01/01/93" or "01/01/1993")
         if len(doj_str.split('/')[2]) == 2:  # Two digit year
-            year_part = int(doj_str.split('/')[2])
-            # Smart year interpretation: if year > 50, assume 19xx, else 20xx
-            if year_part > 50:
-                # Convert to 19xx (50-99 = 1950-1999)
-                full_year = 1900 + year_part
-            else:
-                # Convert to 20xx (00-50 = 2000-2050)
-                full_year = 2000 + year_part
-            
-            # Reconstruct date string with 4-digit year
-            day, month, _ = doj_str.split('/')
-            doj_str_full = f"{day}/{month}/{full_year}"
-            doj = datetime.strptime(doj_str_full, '%d/%m/%Y')
-            
-            print(f"Converted DOJ: {doj_str} -> {doj_str_full} -> {doj.strftime('%d/%m/%Y')}")
-            
+            doj = datetime.strptime(doj_str, '%d/%m/%y')
         else:  # Four digit year
             doj = datetime.strptime(doj_str, '%d/%m/%Y')
         
@@ -338,15 +331,11 @@ def calculate_years_of_service(doj_str, last_working_day):
         # Convert to years (including months and days as decimal)
         years = diff.years + (diff.months / 12) + (diff.days / 365)
         
-        print(f"Service calculation: {doj.strftime('%d/%m/%Y')} to {lwd.strftime('%d/%m/%Y')} = {years:.2f} years")
-        
         return years
-        
     except Exception as e:
         st.error(f"Error calculating service years: {e}")
-        print(f"Date parsing error: DOJ='{doj_str}', LWD='{last_working_day}', Error: {e}")
         return 0
-        
+
 def calculate_gratuity(tenure_years, last_basic_salary):
     """
     Calculate Gratuity using company formula
@@ -380,8 +369,16 @@ def calculate_epf_with_limit(basic_salary, is_reduced=False):
     
     return round(epf, 2)
 
-def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, total_working_days=1):
-    """salary breakdown with EPF calculation"""
+def calculate_employee_epf_with_attendance(employee_epf_amount, present_days, total_working_days):
+    """Calculate EPF based on attendance using formula: EPF_amount / working_days * present_days"""
+    if total_working_days == 0:
+        return 0
+    
+    calculated_epf = (employee_epf_amount / total_working_days) * present_days
+    return round(calculated_epf, 2)
+
+def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, total_working_days=1, employee_epf_amount=1800):
+    """Enhanced salary breakdown with EPF calculation using employee's EPF amount"""
     st.write(f"**💰 Salary Breakdown for {month}**")
     
     # Calculate salary breakdown using correct formula
@@ -435,34 +432,29 @@ def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, tota
             help="Special = Total - Basic - HRA"
         )
     
-    # EPF Calculation Section
+    # Enhanced EPF Calculation Section
     st.write("**🏦 EPF Calculation**")
     
-    # Use prorated basic for EPF calculation if salary is reduced
-    epf_basic = prorated_basic if is_salary_reduced else basic
-    calculated_epf = calculate_epf_with_limit(epf_basic, is_salary_reduced)
+    # Calculate EPF based on employee's EPF amount and attendance
+    calculated_epf = calculate_employee_epf_with_attendance(employee_epf_amount, present_days, total_working_days)
     
     col1, col2 = st.columns(2)
     with col1:
-        st.info(f"**EPF Calculation Logic:**")
-        st.write(f"• Basic for EPF: ₹{epf_basic:,.2f}")
-        if epf_basic <= 15000:
-            st.write(f"• EPF = ₹{epf_basic:,.0f} × 12% = ₹{calculated_epf:,.2f}")
-        else:
-            st.write(f"• EPF = Max limit = ₹1,800")
-        
-        st.write(f"• Max EPF Basic: ₹15,000")
-        st.write(f"• Max EPF Deduction: ₹1,800")
+        st.info(f"**Enhanced EPF Calculation:**")
+        st.write(f"• Employee EPF Amount: ₹{employee_epf_amount:,.0f}")
+        st.write(f"• Present Days: {present_days}")
+        st.write(f"• Total Working Days: {total_working_days}")
+        st.write(f"• Formula: ₹{employee_epf_amount:,.0f} ÷ {total_working_days} × {present_days}")
+        st.write(f"• **Calculated EPF: ₹{calculated_epf:,.2f}**")
     
     with col2:
         epf = st.number_input(
             f"EPF Deduction (₹)", 
             min_value=0.0,
-            max_value=1800.0,
             value=calculated_epf,
             key=f"epf_{month}",
             step=10.0,
-            help="Auto-calculated based on EPF rules. Max ₹1,800"
+            help=f"Auto-calculated: ₹{employee_epf_amount} ÷ {total_working_days} × {present_days} = ₹{calculated_epf}"
         )
         
         if epf != calculated_epf:
@@ -479,7 +471,7 @@ def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, tota
             '50% of Basic', 
             'Rest Amount',
             'Sum of All',
-            'Based on EPF Rules'
+            f'₹{employee_epf_amount} ÷ {total_working_days} × {present_days}'
         ],
         'Amount': [
             f"₹{basic:,.2f}",
@@ -493,7 +485,7 @@ def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, tota
             f"{(hra/base_salary*100) if base_salary > 0 else 0:.1f}%",
             f"{(special_allowances/base_salary*100) if base_salary > 0 else 0:.1f}%",
             "100.0%",
-            f"{(epf/epf_basic*100) if epf_basic > 0 else 0:.1f}%"
+            f"{(epf/employee_epf_amount*100) if employee_epf_amount > 0 else 0:.1f}%"
         ]
     }
     
@@ -506,7 +498,7 @@ def salary_breakdown_input_with_epf(month, base_salary=0.0, present_days=0, tota
         'special_allowances': special_allowances,
         'total': total_breakdown,
         'epf': epf,
-        'epf_basic': epf_basic,
+        'epf_basic': prorated_basic,
         'calculated_epf': calculated_epf
     }
 
@@ -615,8 +607,8 @@ def investment_deductions_input():
         }
     }
 
-def enhanced_multi_month_salary_input():
-    """Enhanced multi-month salary input with EPF logic"""
+def enhanced_multi_month_salary_input(employee_salary=0, employee_epf_amount=1800):
+    """Enhanced multi-month salary input with auto-population and EPF logic"""
     st.subheader("💰 Multi-Month Salary Details")
     
     months = ["January", "February", "March", "April", "May", "June",
@@ -631,7 +623,7 @@ def enhanced_multi_month_salary_input():
             } for month in months
         }
     
-    # Quick add/remove months
+    # Quick add/remove months and auto-fill
     col1, col2 = st.columns(2)
     with col1:
         selected_months = st.multiselect(
@@ -641,6 +633,32 @@ def enhanced_multi_month_salary_input():
         )
     
     with col2:
+        # Auto-fill button for selected months
+        if st.button("🔄 Auto-Fill All Selected Months"):
+            if employee_salary > 0 and selected_months:
+                for month in selected_months:
+                    total_working_days = get_total_working_days(month)
+                    
+                    st.session_state.monthly_salaries[month] = {
+                        'total_salary': float(employee_salary),
+                        'basic': float(employee_salary) / 3,
+                        'hra': (float(employee_salary) / 3) * 0.50,
+                        'special_allowances': float(employee_salary) - (float(employee_salary) / 3) - ((float(employee_salary) / 3) * 0.50),
+                        'present_days': total_working_days,  # Default to full month
+                        'epf': float(employee_epf_amount),
+                        'esi': 0.0,
+                        'total_working_days': total_working_days,
+                        'prorated_salary': float(employee_salary),
+                        'prorated_basic': float(employee_salary) / 3,
+                        'prorated_hra': (float(employee_salary) / 3) * 0.50,
+                        'prorated_special': float(employee_salary) - (float(employee_salary) / 3) - ((float(employee_salary) / 3) * 0.50),
+                    }
+                
+                st.success(f"✅ Auto-filled {len(selected_months)} months with base salary ₹{employee_salary:,.0f}")
+                st.rerun()
+            else:
+                st.warning("Please select an employee and months first")
+        
         if st.button("🔄 Reset All Months"):
             st.session_state.monthly_salaries = {
                 month: {
@@ -670,11 +688,11 @@ def enhanced_multi_month_salary_input():
             with col1:
                 st.info(f"Total working days: {total_working_days}")
                 
-                # Total salary input
+                # Total salary input - pre-filled with employee salary
                 total_salary = st.number_input(
                     f"Total Salary (₹)", 
                     min_value=0.0, 
-                    value=st.session_state.monthly_salaries[month]['total_salary'],
+                    value=st.session_state.monthly_salaries[month]['total_salary'] if st.session_state.monthly_salaries[month]['total_salary'] > 0 else float(employee_salary),
                     key=f"total_salary_{month}",
                     step=1000.0
                 )
@@ -684,7 +702,7 @@ def enhanced_multi_month_salary_input():
                     f"Present Days", 
                     min_value=0, 
                     max_value=total_working_days,
-                    value=st.session_state.monthly_salaries[month]['present_days'],
+                    value=st.session_state.monthly_salaries[month]['present_days'] if st.session_state.monthly_salaries[month]['present_days'] > 0 else total_working_days,
                     key=f"days_{month}"
                 )
             
@@ -698,9 +716,9 @@ def enhanced_multi_month_salary_input():
                     step=10.0
                 )
             
-            # Salary breakdown with EPF calculation
+            # Enhanced salary breakdown with EPF calculation
             if total_salary > 0:
-                breakdown = salary_breakdown_input_with_epf(month, total_salary, present_days, total_working_days)
+                breakdown = salary_breakdown_input_with_epf(month, total_salary, present_days, total_working_days, employee_epf_amount)
                 
                 # Calculate prorated salary
                 if present_days > 0 and total_working_days > 0:
@@ -788,7 +806,7 @@ def enhanced_multi_month_salary_input():
         with col1:
             st.metric("Total EPF", f"₹{totals['total_epf']:,.0f}")
         with col2:
-            max_possible_epf = len(active_months) * 1800  # ₹1,800 per month
+            max_possible_epf = len(active_months) * employee_epf_amount
             st.metric("Max Possible EPF", f"₹{max_possible_epf:,.0f}")
         with col3:
             avg_epf = totals['total_epf'] / len(active_months) if active_months else 0
@@ -822,22 +840,25 @@ def fnf_settlement_form():
             index=0,
             help="Choose employee from dropdown"
         )
+        
+        # Extract employee ID from selection
+        if selected_option:
+            employee_id = int(selected_option.split(" - ")[0])
+        else:
+            employee_id = None
 
     with col2:
         if selected_option:
             st.success(f"✅ Selected: {selected_option}")
     
-    # Process selection and continue with form
-    if selected_option:
-        employee_id = int(selected_option.split(" - ")[0])
+    if employee_id and selected_option:
         employee = get_employee_by_id(employee_id, employee_df)
-        
         if employee is not None:
             # Get employee salary and EPF amount
             employee_base_salary = float(employee['Salary'])
             employee_epf_amount = float(employee.get('EPF Amount', 1800))
             
-            # Display Employee Details
+            # Display Employee Details with enhanced info
             st.subheader("👤 Employee Details (Auto-filled)")
             col1, col2, col3 = st.columns(3)
             
@@ -854,325 +875,279 @@ def fnf_settlement_form():
                 st.info(f"**Monthly Salary:** ₹{employee_base_salary:,.0f}")
                 st.info(f"**EPF Amount:** ₹{employee_epf_amount:,.0f}")
             
-        # Step 2: Tax Regime Selection (moved up to control visibility)
-        st.subheader("🏛️ Step 2: Select Tax Regime")
-        tax_regime = st.selectbox("Tax Regime", ["Old Tax Regime", "New Tax Regime"])
-        
-        # Step 3: Multi-Month Salary Input
-        active_months = enhanced_multi_month_salary_input()
-        
-        if not active_months:
-            st.warning("Please add salary details for at least one month to proceed")
-            return
-        
-        # Step 4: Investment Options (only for Old Tax Regime)
-        investments_data = {}
-        if tax_regime == "Old Tax Regime":
-            st.write("---")
-            investments_data = investment_deductions_input()
-        else:
-            st.info("📢 **New Tax Regime Selected** - Investment deductions are not available in the new tax regime")
-        
-        # Step 5: Other F&F Details
-        st.subheader("📝 Step 5: Additional F&F Details")
-        
-        # Form for additional details (no buttons inside)
-        with st.form("fnf_additional_details"):
-            col1, col2 = st.columns(2)
+            # Step 2: Tax Regime Selection
+            st.subheader("🏛️ Step 2: Select Tax Regime")
+            tax_regime = st.selectbox("Tax Regime", ["Old Tax Regime", "New Tax Regime"])
             
-            with col1:
-                st.write("**📅 Important Dates**")
-                resignation_date = st.date_input("Resignation Date", value=date.today())
-                last_working_day = st.date_input("Last Working Day", value=date.today())
+            # Step 3: Enhanced Multi-Month Salary Input with Auto-Population
+            active_months = enhanced_multi_month_salary_input(employee_base_salary, employee_epf_amount)
+            
+            if not active_months:
+                st.warning("Please add salary details for at least one month to proceed")
+                return
+            
+            # Step 4: Investment Options (only for Old Tax Regime)
+            investments_data = {}
+            if tax_regime == "Old Tax Regime":
+                st.write("---")
+                investments_data = investment_deductions_input()
+            else:
+                st.info("📢 **New Tax Regime Selected** - Investment deductions are not available in the new tax regime")
+            
+            # Step 5: Other F&F Details
+            st.subheader("📝 Step 5: Additional F&F Details")
+            
+            # Form for additional details (no buttons inside)
+            with st.form("fnf_additional_details"):
+                col1, col2 = st.columns(2)
                 
-                st.write("**💰 Additional Components**")
+                with col1:
+                    st.write("**📅 Important Dates**")
+                    resignation_date = st.date_input("Resignation Date", value=date.today())
+                    last_working_day = st.date_input("Last Working Day", value=date.today())
+                    
+                    st.write("**💰 Additional Components**")
+                    gratuity = st.number_input("Gratuity (₹)", value=0.0, min_value=0.0)
+                    bonus = st.number_input("Bonus (₹)", value=0.0, min_value=0.0)
+                    leave_encashment = st.number_input("Leave Encashment (₹)", value=0.0, min_value=0.0)
                 
-                # Enhanced Gratuity Calculation
-                years_of_service = calculate_years_of_service(employee['Date of Joining'], last_working_day)
-                
-                # Calculate last basic salary (average from active months if available)
-                if active_months:
-                    total_basic = sum(month_data['prorated_basic'] for month_data in active_months.values())
-                    last_basic_salary = total_basic / len(active_months)
-                else:
-                    last_basic_salary = employee_base_salary / 3  # Default basic calculation
-                
-                # Auto-calculate gratuity
-                calculated_gratuity = calculate_gratuity(years_of_service, last_basic_salary)
-                
-                # Gratuity input with auto-calculation
-                col_grat1, col_grat2 = st.columns([1, 1])
-                with col_grat1:
-                    st.info(f"**Gratuity Calculation:**")
-                    st.write(f"• Years of Service: {years_of_service:.2f}")
-                    st.write(f"• Last Basic: ₹{last_basic_salary:,.0f}")
-                    if years_of_service < 5:
-                        st.warning("⚠️ Less than 5 years - No gratuity")
+                with col2:
+                    st.write("**📉 Additional Deductions**")
+                    
+                    # PT only for Chennai and Bangalore
+                    pt_enabled = employee['BaseLocation'].lower() in ['chennai', 'bangalore']
+                    if pt_enabled:
+                        pt_total = st.number_input("PT - Professional Tax Total (₹)", value=0.0, min_value=0.0)
+                        st.info("✅ PT applicable for Chennai/Bangalore")
                     else:
-                        st.success(f"✅ Calculated: ₹{calculated_gratuity:,.0f}")
-                
-                with col_grat2:
-                    gratuity = st.number_input(
-                        "Gratuity (₹)", 
-                        value=calculated_gratuity, 
-                        min_value=0.0,
-                        help=f"Auto-calculated: {years_of_service:.1f} years"
-                    )
+                        pt_total = 0.0
+                        st.info("❌ PT not applicable for this location")
                     
-                    if abs(gratuity - calculated_gratuity) > 100:
-                        st.warning(f"⚠️ Manual override!")
+                    salary_advance = st.number_input("Salary Advance (₹)", value=0.0, min_value=0.0)
+                    tada_recovery = st.number_input("TADA Recovery (₹)", value=0.0, min_value=0.0)
+                    wfh_recovery = st.number_input("WFH Recovery (₹)", value=0.0, min_value=0.0)
+                    notice_period_recovery = st.number_input("Notice Period Recovery (₹)", value=0.0, min_value=0.0)
+                    other_deductions = st.number_input("Other Deductions (₹)", value=0.0, min_value=0.0)
                 
-                bonus = st.number_input("Bonus (₹)", value=0.0, min_value=0.0)
-                leave_encashment = st.number_input("Leave Encashment (₹)", value=0.0, min_value=0.0)
-
-            with col2:
-                st.write("**📉 Additional Deductions**")
+                # Calculate button (this is allowed in forms)
+                calculate_clicked = st.form_submit_button("🧮 Calculate F&F Settlement", use_container_width=True)
+            
+            # Process calculation when form is submitted
+            if calculate_clicked:
+                # Store calculation results in session state
+                st.session_state.calculation_done = True
+                st.session_state.calculation_data = {
+                    'tax_regime': tax_regime,
+                    'resignation_date': resignation_date,
+                    'last_working_day': last_working_day,
+                    'gratuity': gratuity,
+                    'bonus': bonus,
+                    'leave_encashment': leave_encashment,
+                    'pt_total': pt_total,
+                    'salary_advance': salary_advance,
+                    'tada_recovery': tada_recovery,
+                    'wfh_recovery': wfh_recovery,
+                    'notice_period_recovery': notice_period_recovery,
+                    'other_deductions': other_deductions,
+                    'investments_data': investments_data
+                }
+            
+            # Show calculation results and action buttons (outside the form)
+            if st.session_state.get('calculation_done', False):
+                data = st.session_state.calculation_data
                 
-                # PT only for Chennai and Bangalore
-                pt_enabled = employee['BaseLocation'].lower() in ['chennai', 'bangalore']
-                if pt_enabled:
-                    pt_total = st.number_input("PT - Professional Tax Total (₹)", value=0.0, min_value=0.0)
-                    st.info("✅ PT applicable for Chennai/Bangalore")
-                else:
-                    pt_total = 0.0
-                    st.info("❌ PT not applicable for this location")
+                # Calculate totals from active months
+                totals = {
+                    'total_salary': sum(month_data['total_salary'] for month_data in active_months.values()),
+                    'prorated_total': sum(month_data['prorated_salary'] for month_data in active_months.values()),
+                    'prorated_basic': sum(month_data['prorated_basic'] for month_data in active_months.values()),
+                    'prorated_hra': sum(month_data['prorated_hra'] for month_data in active_months.values()),
+                    'prorated_special': sum(month_data['prorated_special'] for month_data in active_months.values()),
+                    'total_epf': sum(month_data['epf'] for month_data in active_months.values()),
+                    'total_esi': sum(month_data['esi'] for month_data in active_months.values())
+                }
                 
-                salary_advance = st.number_input("Salary Advance (₹)", value=0.0, min_value=0.0)
-                tada_recovery = st.number_input("TADA Recovery (₹)", value=0.0, min_value=0.0)
-                wfh_recovery = st.number_input("WFH Recovery (₹)", value=0.0, min_value=0.0)
-                notice_period_recovery = st.number_input("Notice Period Recovery (₹)", value=0.0, min_value=0.0)
-                other_deductions = st.number_input("Other Deductions (₹)", value=0.0, min_value=0.0)
-            
-            # Calculate button (this is allowed in forms)
-            calculate_clicked = st.form_submit_button("🧮 Calculate F&F Settlement", use_container_width=True)
-        
-        # Process calculation when form is submitted
-        if calculate_clicked:
-            # Store calculation results in session state
-            st.session_state.calculation_done = True
-            st.session_state.calculation_data = {
-                'tax_regime': tax_regime,
-                'resignation_date': resignation_date,
-                'last_working_day': last_working_day,
-                'gratuity': gratuity,
-                'bonus': bonus,
-                'leave_encashment': leave_encashment,
-                'pt_total': pt_total,
-                'salary_advance': salary_advance,
-                'tada_recovery': tada_recovery,
-                'wfh_recovery': wfh_recovery,
-                'notice_period_recovery': notice_period_recovery,
-                'other_deductions': other_deductions,
-                'investments_data': investments_data
-            }
-
-            # Temporary debug section - add this after employee details display
-            if st.checkbox("🔧 Debug DOJ & Gratuity"):
-                st.write("**Debug Information:**")
-                st.write(f"Original DOJ: {employee['Date of Joining']}")
+                # Total Earnings
+                total_earnings = totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment']
                 
-                test_lwd = date.today()
-                years_calc = calculate_years_of_service(employee['Date of Joining'], test_lwd)
-                st.write(f"Calculated Years: {years_calc:.2f}")
+                # Total Deductions (without TDS)
+                total_deductions_before_tds = (totals['total_epf'] + totals['total_esi'] + data['pt_total'] + 
+                                             data['salary_advance'] + data['tada_recovery'] + data['wfh_recovery'] + 
+                                             data['notice_period_recovery'] + data['other_deductions'])
                 
-                test_basic = employee_base_salary / 3
-                test_gratuity = calculate_gratuity(years_calc, test_basic)
-                st.write(f"Test Gratuity: ₹{test_gratuity:,.2f}")
-        
-        # Show calculation results and action buttons (outside the form)
-        if st.session_state.get('calculation_done', False):
-            data = st.session_state.calculation_data
-            
-            # Calculate totals from active months
-            totals = {
-                'total_salary': sum(month_data['total_salary'] for month_data in active_months.values()),
-                'prorated_total': sum(month_data['prorated_salary'] for month_data in active_months.values()),
-                'prorated_basic': sum(month_data['prorated_basic'] for month_data in active_months.values()),
-                'prorated_hra': sum(month_data['prorated_hra'] for month_data in active_months.values()),
-                'prorated_special': sum(month_data['prorated_special'] for month_data in active_months.values()),
-                'total_epf': sum(month_data['epf'] for month_data in active_months.values()),
-                'total_esi': sum(month_data['esi'] for month_data in active_months.values())
-            }
-            
-            # Total Earnings
-            total_earnings = totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment']
-            
-            # Total Deductions (without TDS)
-            total_deductions_before_tds = (totals['total_epf'] + totals['total_esi'] + data['pt_total'] + 
-                                         data['salary_advance'] + data['tada_recovery'] + data['wfh_recovery'] + 
-                                         data['notice_period_recovery'] + data['other_deductions'])
-            
-            # Taxable Income calculation
-            if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-                # Subtract exempt allowances from taxable income
-                exempt_allowances = data['investments_data'].get('exempt_allowances', 0)
-                taxable_income = total_earnings - total_deductions_before_tds - exempt_allowances
-                
-                # Calculate TDS with investment deductions
-                total_investments = data['investments_data'].get('total_deductions', 0)
-                tds_amount = calculate_tds_old_regime(taxable_income, total_investments=total_investments)
-            else:
-                # New Tax Regime - no investment deductions
-                taxable_income = total_earnings - total_deductions_before_tds
-                tds_amount = calculate_tds_new_regime(taxable_income)
-            
-            # Total deductions including TDS
-            total_deductions = total_deductions_before_tds + tds_amount
-            
-            # Net Payable
-            net_payable = total_earnings - total_deductions
-            
-            # Display F&F Settlement Summary
-            st.subheader("📊 Full & Final Settlement Summary")
-            
-            # Month-wise breakdown with salary components
-            st.write("**📅 Month-wise Salary Breakdown:**")
-            month_breakdown = []
-            for month, month_data in active_months.items():
-                month_breakdown.append({
-                    'Month': month,
-                    'Total Salary': f"₹{month_data['total_salary']:,.2f}",
-                    'Days': f"{month_data['present_days']}/{month_data['total_working_days']}",
-                    'Prorated Basic': f"₹{month_data['prorated_basic']:,.2f}",
-                    'Prorated HRA': f"₹{month_data['prorated_hra']:,.2f}",
-                    'Prorated Special': f"₹{month_data['prorated_special']:,.2f}",
-                    'EPF': f"₹{month_data['epf']:,.2f}",
-                    'ESI': f"₹{month_data['esi']:,.2f}"
-                })
-            
-            month_df = pd.DataFrame(month_breakdown)
-            st.dataframe(month_df, use_container_width=True, hide_index=True)
-            
-            # Investment Summary for Old Tax Regime
-            if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-                with st.expander("💼 Investment & Deduction Details"):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.write("**Section 80C**")
-                        st.metric("Total 80C", f"₹{data['investments_data']['80c_total']:,.0f}")
-                        
-                    with col2:
-                        st.write("**Other Deductions**")
-                        st.metric("Section 80D", f"₹{data['investments_data']['80d_total']:,.0f}")
-                        st.metric("Other", f"₹{data['investments_data']['other_deductions']:,.0f}")
-                        
-                    with col3:
-                        st.write("**Exempt Allowances**")
-                        st.metric("Total Exempt", f"₹{data['investments_data']['exempt_allowances']:,.0f}")
-                        st.metric("Tax Savings", f"₹{data['investments_data']['total_deductions']:,.0f}")
-            
-            # Overall Summary
-            st.write("**💰 Overall F&F Summary:**")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.success("**EARNINGS**")
-                st.write(f"Basic Salary: ₹{totals['prorated_basic']:,.2f}")
-                st.write(f"HRA: ₹{totals['prorated_hra']:,.2f}")
-                st.write(f"Special Allowances: ₹{totals['prorated_special']:,.2f}")
-                st.write(f"Gratuity: ₹{data['gratuity']:,.2f}")
-                st.write(f"Bonus: ₹{data['bonus']:,.2f}")
-                st.write(f"Leave Encashment: ₹{data['leave_encashment']:,.2f}")
-                st.write("---")
-                st.write(f"**Total Earnings: ₹{total_earnings:,.2f}**")
-            
-            with col2:
-                st.error("**DEDUCTIONS**")
-                st.write(f"Total EPF: ₹{totals['total_epf']:,.2f}")
-                st.write(f"Total ESI: ₹{totals['total_esi']:,.2f}")
-                st.write(f"PT: ₹{data['pt_total']:,.2f}")
-                st.write(f"Salary Advance: ₹{data['salary_advance']:,.2f}")
-                st.write(f"TADA Recovery: ₹{data['tada_recovery']:,.2f}")
-                st.write(f"WFH Recovery: ₹{data['wfh_recovery']:,.2f}")
-                st.write(f"Notice Period: ₹{data['notice_period_recovery']:,.2f}")
-                st.write(f"Other: ₹{data['other_deductions']:,.2f}")
-                st.write(f"TDS ({data['tax_regime'].split()[0]}): ₹{tds_amount:,.2f}")
-                st.write("---")
-                st.write(f"**Total Deductions: ₹{total_deductions:,.2f}**")
-            
-            with col3:
-                st.info("**NET SETTLEMENT**")
-                if net_payable >= 0:
-                    st.metric("Net Payable", f"₹{net_payable:,.2f}", delta="✅ Credit")
-                else:
-                    st.metric("Net Recoverable", f"₹{abs(net_payable):,.2f}", delta="❌ Debit")
-                
-                st.write(f"**Tax Regime:** {data['tax_regime']}")
+                # Taxable Income calculation
                 if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-                    tax_saved = (data['investments_data']['total_deductions'] * 0.30)  # Approx tax saved
-                    st.metric("Est. Tax Saved", f"₹{tax_saved:,.0f}")
-            
-            # Save F&F data
-            fnf_data = {
-                'employee_id': employee['Employee ID'],
-                'employee_name': employee['Employee Name'],
-                'designation': employee['Designation'],
-                'base_location': employee['BaseLocation'],
-                'doj': employee['Date of Joining'],
-                'resignation_date': data['resignation_date'].strftime('%d/%m/%Y'),
-                'last_working_day': data['last_working_day'].strftime('%d/%m/%Y'),
-                'tax_regime': data['tax_regime'],
-                'active_months': active_months,
-                'salary_totals': totals,
-                'investments_data': data['investments_data'],
-                'gratuity': data['gratuity'],
-                'bonus': data['bonus'],
-                'leave_encashment': data['leave_encashment'],
-                'total_earnings': total_earnings,
-                'pt_total': data['pt_total'],
-                'salary_advance': data['salary_advance'],
-                'tada_recovery': data['tada_recovery'],
-                'wfh_recovery': data['wfh_recovery'],
-                'notice_period_recovery': data['notice_period_recovery'],
-                'other_deductions': data['other_deductions'],
-                'tds_amount': tds_amount,
-                'total_deductions': total_deductions,
-                'net_payable': net_payable,
-                'taxable_income': taxable_income,
-                'status': 'Pending Tax Review'
-            }
-            
-            if 'fnf_submissions' not in st.session_state:
-                st.session_state.fnf_submissions = []
-            
-            # Update or add F&F submission
-            existing_index = None
-            for i, submission in enumerate(st.session_state.fnf_submissions):
-                if submission['employee_id'] == employee['Employee ID']:
-                    existing_index = i
-                    break
-            
-            if existing_index is not None:
-                st.session_state.fnf_submissions[existing_index] = fnf_data
-            else:
-                st.session_state.fnf_submissions.append(fnf_data)
-            
-            # Action buttons (outside the form)
-            st.write("---")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("📤 Send to Tax Team", use_container_width=True):
-                    fnf_data['status'] = 'Under Tax Review'
-                    st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
-                    save_fnf_data()  # Save to file
-                    st.success("✅ F&F settlement sent to Tax Team for review!")
-                    st.session_state.calculation_done = False
-                    st.rerun()
-            
-            with col2:
-                if st.button("💾 Save Draft", use_container_width=True):
-                    fnf_data['status'] = 'Draft'
-                    st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
-                    save_fnf_data()  # Save to file
-                    st.info("💾 F&F settlement saved as draft")
-                    st.session_state.calculation_done = False
-                    st.rerun()
-            
-            with col3:
-                if st.button("📄 Detailed Report", use_container_width=True):
-                    st.info("📄 Comprehensive F&F report with all breakdowns generated!")
+                    # Subtract exempt allowances from taxable income
+                    exempt_allowances = data['investments_data'].get('exempt_allowances', 0)
+                    taxable_income = total_earnings - total_deductions_before_tds - exempt_allowances
+                    
+                    # Calculate TDS with investment deductions
+                    total_investments = data['investments_data'].get('total_deductions', 0)
+                    tds_amount = calculate_tds_old_regime(taxable_income, total_investments=total_investments)
+                else:
+                    # New Tax Regime - no investment deductions
+                    taxable_income = total_earnings - total_deductions_before_tds
+                    tds_amount = calculate_tds_new_regime(taxable_income)
+                
+                # Total deductions including TDS
+                total_deductions = total_deductions_before_tds + tds_amount
+                
+                # Net Payable
+                net_payable = total_earnings - total_deductions
+                
+                # Display F&F Settlement Summary
+                st.subheader("📊 Full & Final Settlement Summary")
+                
+                # Month-wise breakdown with salary components
+                st.write("**📅 Month-wise Salary Breakdown:**")
+                month_breakdown = []
+                for month, month_data in active_months.items():
+                    month_breakdown.append({
+                        'Month': month,
+                        'Total Salary': f"₹{month_data['total_salary']:,.2f}",
+                        'Days': f"{month_data['present_days']}/{month_data['total_working_days']}",
+                        'Prorated Basic': f"₹{month_data['prorated_basic']:,.2f}",
+                        'Prorated HRA': f"₹{month_data['prorated_hra']:,.2f}",
+                        'Prorated Special': f"₹{month_data['prorated_special']:,.2f}",
+                        'EPF': f"₹{month_data['epf']:,.2f}",
+                        'ESI': f"₹{month_data['esi']:,.2f}"
+                    })
+                
+                month_df = pd.DataFrame(month_breakdown)
+                st.dataframe(month_df, use_container_width=True, hide_index=True)
+                
+                # Investment Summary for Old Tax Regime
+                if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
+                    with st.expander("💼 Investment & Deduction Details"):
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.write("**Section 80C**")
+                            st.metric("Total 80C", f"₹{data['investments_data']['80c_total']:,.0f}")
+                            
+                        with col2:
+                            st.write("**Other Deductions**")
+                            st.metric("Section 80D", f"₹{data['investments_data']['80d_total']:,.0f}")
+                            st.metric("Other", f"₹{data['investments_data']['other_deductions']:,.0f}")
+                            
+                        with col3:
+                            st.write("**Exempt Allowances**")
+                            st.metric("Total Exempt", f"₹{data['investments_data']['exempt_allowances']:,.0f}")
+                            st.metric("Tax Savings", f"₹{data['investments_data']['total_deductions']:,.0f}")
+                
+                # Overall Summary
+                st.write("**💰 Overall F&F Summary:**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.success("**EARNINGS**")
+                    st.write(f"Basic Salary: ₹{totals['prorated_basic']:,.2f}")
+                    st.write(f"HRA: ₹{totals['prorated_hra']:,.2f}")
+                    st.write(f"Special Allowances: ₹{totals['prorated_special']:,.2f}")
+                    st.write(f"Gratuity: ₹{data['gratuity']:,.2f}")
+                    st.write(f"Bonus: ₹{data['bonus']:,.2f}")
+                    st.write(f"Leave Encashment: ₹{data['leave_encashment']:,.2f}")
+                    st.write("---")
+                    st.write(f"**Total Earnings: ₹{total_earnings:,.2f}**")
+                
+                with col2:
+                    st.error("**DEDUCTIONS**")
+                    st.write(f"Total EPF: ₹{totals['total_epf']:,.2f}")
+                    st.write(f"Total ESI: ₹{totals['total_esi']:,.2f}")
+                    st.write(f"PT: ₹{data['pt_total']:,.2f}")
+                    st.write(f"Salary Advance: ₹{data['salary_advance']:,.2f}")
+                    st.write(f"TADA Recovery: ₹{data['tada_recovery']:,.2f}")
+                    st.write(f"WFH Recovery: ₹{data['wfh_recovery']:,.2f}")
+                    st.write(f"Notice Period: ₹{data['notice_period_recovery']:,.2f}")
+                    st.write(f"Other: ₹{data['other_deductions']:,.2f}")
+                    st.write(f"TDS ({data['tax_regime'].split()[0]}): ₹{tds_amount:,.2f}")
+                    st.write("---")
+                    st.write(f"**Total Deductions: ₹{total_deductions:,.2f}**")
+                
+                with col3:
+                    st.info("**NET SETTLEMENT**")
+                    if net_payable >= 0:
+                        st.metric("Net Payable", f"₹{net_payable:,.2f}", delta="✅ Credit")
+                    else:
+                        st.metric("Net Recoverable", f"₹{abs(net_payable):,.2f}", delta="❌ Debit")
+                    
+                    st.write(f"**Tax Regime:** {data['tax_regime']}")
+                    if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
+                        tax_saved = (data['investments_data']['total_deductions'] * 0.30)  # Approx tax saved
+                        st.metric("Est. Tax Saved", f"₹{tax_saved:,.0f}")
+                
+                # Save F&F data
+                fnf_data = {
+                    'employee_id': employee['Employee ID'],
+                    'employee_name': employee['Employee Name'],
+                    'designation': employee['Designation'],
+                    'base_location': employee['BaseLocation'],
+                    'doj': employee['Date of Joining'],
+                    'resignation_date': data['resignation_date'].strftime('%d/%m/%Y'),
+                    'last_working_day': data['last_working_day'].strftime('%d/%m/%Y'),
+                    'tax_regime': data['tax_regime'],
+                    'active_months': active_months,
+                    'salary_totals': totals,
+                    'investments_data': data['investments_data'],
+                    'gratuity': data['gratuity'],
+                    'bonus': data['bonus'],
+                    'leave_encashment': data['leave_encashment'],
+                    'total_earnings': total_earnings,
+                    'pt_total': data['pt_total'],
+                    'salary_advance': data['salary_advance'],
+                    'tada_recovery': data['tada_recovery'],
+                    'wfh_recovery': data['wfh_recovery'],
+                    'notice_period_recovery': data['notice_period_recovery'],
+                    'other_deductions': data['other_deductions'],
+                    'tds_amount': tds_amount,
+                    'total_deductions': total_deductions,
+                    'net_payable': net_payable,
+                    'taxable_income': taxable_income,
+                    'status': 'Pending Tax Review'
+                }
+                
+                if 'fnf_submissions' not in st.session_state:
+                    st.session_state.fnf_submissions = []
+                
+                # Update or add F&F submission
+                existing_index = None
+                for i, submission in enumerate(st.session_state.fnf_submissions):
+                    if submission['employee_id'] == employee['Employee ID']:
+                        existing_index = i
+                        break
+                
+                if existing_index is not None:
+                    st.session_state.fnf_submissions[existing_index] = fnf_data
+                else:
+                    st.session_state.fnf_submissions.append(fnf_data)
+                
+                # Action buttons (outside the form)
+                st.write("---")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("📤 Send to Tax Team", use_container_width=True):
+                        fnf_data['status'] = 'Under Tax Review'
+                        st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
+                        save_fnf_data()  # Save to file
+                        st.success("✅ F&F settlement sent to Tax Team for review!")
+                        st.session_state.calculation_done = False
+                        st.rerun()
+                
+                with col2:
+                    if st.button("💾 Save Draft", use_container_width=True):
+                        fnf_data['status'] = 'Draft'
+                        st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
+                        save_fnf_data()  # Save to file
+                        st.info("💾 F&F settlement saved as draft")
+                        st.session_state.calculation_done = False
+                        st.rerun()
+                
+                with col3:
+                    if st.button("📄 Detailed Report", use_container_width=True):
+                        st.info("📄 Comprehensive F&F report with all breakdowns generated!")
+        else:
+            st.error("❌ Employee not found")
 
 def tax_review_dashboard():
     """Tax Review Dashboard"""
@@ -1222,7 +1197,7 @@ def tax_review_dashboard():
             'Tax Rejected': '🔴'
         }.get(submission['status'], '⚪')
         
-        with st.expander(f"{status_emoji} {submission['employee_name']} (ID: {submission['employee_id']}) - {submission['status']}", expanded=True):
+        with st.expander(f"{status_emoji} {submission['employee_name']} (ID: {int(submission['employee_id'])}) - {submission['status']}", expanded=True):
             
             # Employee & Financial Summary
             col1, col2 = st.columns(2)
@@ -1230,7 +1205,7 @@ def tax_review_dashboard():
             with col1:
                 st.write("**👤 Employee Information:**")
                 st.write(f"• **Name:** {submission['employee_name']}")
-                st.write(f"• **Employee ID:** {submission['employee_id']}")
+                st.write(f"• **Employee ID:** {int(submission['employee_id'])}")
                 st.write(f"• **Designation:** {submission['designation']}")
                 st.write(f"• **Location:** {submission['base_location']}")
                 st.write(f"• **DOJ:** {submission['doj']}")
@@ -1407,7 +1382,7 @@ def payroll_dashboard():
                     
                     with col1:
                         st.write(f"**Employee:** {submission['employee_name']}")
-                        st.write(f"**Employee ID:** {submission['employee_id']}")
+                        st.write(f"**Employee ID:** {int(submission['employee_id'])}")
                         st.write(f"**Last Working Day:** {submission['last_working_day']}")
                         st.write(f"**Tax Regime:** {submission['tax_regime']}")
                         
@@ -1663,4 +1638,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
