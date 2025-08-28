@@ -127,7 +127,7 @@ def add_sidebar_logo():
                     del st.session_state[key]
                 st.rerun()
 
-Copy@st.cache_data(ttl=300)
+@st.cache_data(ttl=300)
 def load_employee_data():
     """Load employee data from Google Sheets or demo data"""
     if not GOOGLE_SHEETS_AVAILABLE:
@@ -217,7 +217,6 @@ def load_employee_data():
         st.warning(f"Could not connect to Google Sheets: {e}. Using demo data.")
         return get_demo_employee_data()
 
-Step 2: Test Locally (Should Work with Demo Data)
 def get_employee_by_id(employee_id, df):
     """Get employee details by ID"""
     employee = df[df['Employee ID'] == int(employee_id)]
