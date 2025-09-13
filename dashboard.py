@@ -8,6 +8,8 @@ from dateutil.relativedelta import relativedelta
 import re
 import hashlib
 import random
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Environment variables
 rms_user = os.getenv('RMS_USER')
@@ -612,198 +614,75 @@ def add_sidebar_logo():
 
 @st.cache_data(ttl=300)
 def load_employee_data():
-    """Load employee data from Google Sheets with demo fallback."""
-    
-    # Try Google Sheets first
-    if GOOGLE_SHEETS_AVAILABLE:
-        try:
-            SCOPES = [
-                "https://www.googleapis.com/auth/spreadsheets.readonly",
-                "https://www.googleapis.com/auth/drive.readonly",
-            ]
-            
-            # Check if secrets are available
-            if "gcp_service_account" in st.secrets:
-                s = st.secrets["gcp_service_account"]
-                creds = Credentials.from_service_account_info(s, scopes=SCOPES)
-                gc = gspread.authorize(creds)
+    """Load employee data from Google Sheets only (strict; no demo fallback)."""
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    try:
+        # Use secrets-only (recommended)
+        if "gcp_service_account" not in st.secrets:
+            st.error("Missing st.secrets['gcp_service_account']. Add your service-account JSON + spreadsheet_id (+ optional worksheet_name or worksheet_gid).")
+            st.stop()
 
-                spreadsheet_id = s.get("spreadsheet_id")
-                worksheet_name = s.get("worksheet_name", "Employee Master")
-                worksheet_gid = s.get("worksheet_gid")
+        s = st.secrets["gcp_service_account"]
+        creds = Credentials.from_service_account_info(s, scopes=SCOPES)
+        gc = gspread.authorize(creds)
 
-                if spreadsheet_id:
-                    ss = gc.open_by_key(spreadsheet_id)
-                    ws = ss.get_worksheet_by_id(int(worksheet_gid)) if worksheet_gid else ss.worksheet(worksheet_name)
-                    
-                    data = ws.get_all_records()
-                    if data:
-                        df = pd.DataFrame(data)
-                        
-                        # Normalize the data
-                        if 'Employee ID' in df.columns:
-                            df = df[(df['Employee ID'] != 0) & (df['Employee ID'] != '')]
-                            try:
-                                df['Employee ID'] = pd.to_numeric(df['Employee ID'], errors='coerce').astype('Int64')
-                            except Exception:
-                                pass
+        spreadsheet_id = s.get("spreadsheet_id")
+        worksheet_name = s.get("worksheet_name", "Employee Master")
+        worksheet_gid = s.get("worksheet_gid")
 
-                        if 'Salary' in df.columns:
-                            df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
-                            df = df.dropna(subset=['Salary'])
+        if not spreadsheet_id:
+            st.error("st.secrets['gcp_service_account']['spreadsheet_id'] is required.")
+            st.stop()
 
-                        for col in ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']:
-                            if col in df.columns:
-                                df[col] = df[col].fillna('').astype(str)
+        ss = gc.open_by_key(spreadsheet_id)
+        ws = ss.get_worksheet_by_id(int(worksheet_gid)) if worksheet_gid else ss.worksheet(worksheet_name)
 
-                        # Handle EPF related columns
-                        maybe_numeric_cols = [
-                            'EPF Rate','PF Rate','EPF Wages','PF Wages','EPF Full Month',
-                            'EPF Fixed','EPF Fixed Deduction','PF Wage Cap','EPF','PF',
-                            'PF Deduction','EPF Deduction','Employee EPF','EPF Employee',
-                            'PF Employee','Total EPF','EPF Amount','EPF Per Month','Employee PF Contribution',
-                            'PF Amount','PF Per Month'
-                        ]
-                        for cname in maybe_numeric_cols:
-                            if cname in df.columns:
-                                df[cname] = pd.to_numeric(df[cname].astype(str).str.replace(',', ''), errors='coerce')
+        data = ws.get_all_records()
+        if not data:
+            st.error("Google Sheet is empty or unreadable.")
+            st.stop()
 
-                        for cname in ['EPF Applicable','PF Applicable','EPF Capped','PF Capped']:
-                            if cname in df.columns:
-                                df[cname] = df[cname].astype(str)
-                        
-                        st.success("✅ Successfully loaded data from Google Sheets")
-                        return df
-                        
-        except Exception as e:
-            st.warning(f"Google Sheets connection failed: {str(e)}")
-            # Fall through to demo data
-    
-    # Demo data fallback
-    st.info("📊 Using demo employee data for testing")
-    
-    demo_data = {
-        'Employee ID': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
-        'Employee Name': [
-            'Rajesh Kumar', 'Priya Sharma', 'Amit Singh', 'Sneha Patel', 'Vikram Gupta',
-            'Anita Reddy', 'Rohit Agarwal', 'Kavya Nair', 'Suresh Yadav', 'Meera Joshi'
-        ],
-        'Designation': [
-            'Software Engineer', 'Senior Analyst', 'Project Manager', 'QA Engineer', 'Tech Lead',
-            'Business Analyst', 'Developer', 'Senior Developer', 'Manager', 'Associate'
-        ],
-        'BaseLocation': [
-            'Bangalore', 'Chennai', 'Mumbai', 'Delhi', 'Pune',
-            'Hyderabad', 'Bangalore', 'Chennai', 'Mumbai', 'Pune'
-        ],
-        'Date of Joining': [
-            '15/06/2020', '22/03/2019', '10/11/2021', '05/08/2020', '18/12/2018',
-            '25/01/2022', '12/09/2019', '30/04/2021', '08/07/2020', '14/02/2019'
-        ],
-        'Salary': [75000, 95000, 120000, 65000, 140000, 85000, 70000, 110000, 150000, 80000],
-        'PAN No.': [
-            'ABCDE1234F', 'FGHIJ5678K', 'KLMNO9012P', 'PQRST3456U', 'UVWXY7890Z',
-            'BCDEF2345G', 'GHIJK6789L', 'LMNOP0123Q', 'QRSTU4567V', 'VWXYZ8901A'
-        ],
-        # EPF related demo data
-        'EPF Applicable': ['Yes'] * 10,
-        'EPF Rate': [12.0] * 10,
-        'EPF Wages': [15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000],
-        'EPF Capped': ['Yes'] * 10,
-        'EPF Fixed': [1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800, 1800],
-        'PF Wage Cap': [15000] * 10
-    }
-    
-    df = pd.DataFrame(demo_data)
-    
-    # Apply same normalization as Google Sheets data
-    df['Employee ID'] = df['Employee ID'].astype('Int64')
-    df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
-    
-    for col in ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']:
-        df[col] = df[col].astype(str)
-    
-    # Handle EPF columns
-    numeric_cols = ['EPF Rate', 'EPF Wages', 'EPF Fixed', 'PF Wage Cap']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    boolean_cols = ['EPF Applicable', 'EPF Capped']
-    for col in boolean_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str)
-    
-    return df
-    
-def show_google_sheets_setup():
-    """Show Google Sheets setup instructions"""
-    st.markdown("""
-    <div class="info-card">
-        <h3>🔧 Google Sheets Integration Setup</h3>
-        <p>To connect your own Google Sheets employee data:</p>
-        
-        <h4>Step 1: Create Google Cloud Project</h4>
-        <ol>
-            <li>Go to <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a></li>
-            <li>Create a new project or select existing one</li>
-            <li>Enable Google Sheets API and Google Drive API</li>
-        </ol>
-        
-        <h4>Step 2: Create Service Account</h4>
-        <ol>
-            <li>Go to IAM & Admin → Service Accounts</li>
-            <li>Create new service account</li>
-            <li>Download JSON key file</li>
-            <li>Share your Google Sheet with the service account email</li>
-        </ol>
-        
-        <h4>Step 3: Configure Streamlit Secrets</h4>
-        <p>Add the service account credentials to your Streamlit Cloud secrets.</p>
-        
-        <h4>Current Status</h4>
-        <p><strong>Google Sheets:</strong> {'✅ Connected' if GOOGLE_SHEETS_AVAILABLE and 'gcp_service_account' in st.secrets else '❌ Not configured (using demo data)'}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 Employee Master", "📋 F&F Settlement", "📊 F&F Status", "📈 Analytics", "🎯 Quick Actions", "⚙️ Setup"])
+        df = pd.DataFrame(data)
 
-with tab6:
-    st.markdown("""
-    <div class="employee-card">
-        <h3>⚙️ System Setup & Configuration</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Google Sheets status
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Data Source Status")
-        
-        if GOOGLE_SHEETS_AVAILABLE and 'gcp_service_account' in st.secrets:
-            create_enhanced_metric_card("Google Sheets", "Connected", delta="✅ Active", icon="📊")
-        else:
-            create_enhanced_metric_card("Google Sheets", "Demo Mode", delta="⚠️ Not configured", icon="📊")
-        
-        employee_df = load_employee_data()
-        create_enhanced_metric_card("Employee Records", len(employee_df), icon="👥")
-    
-    with col2:
-        st.markdown("### 🔧 Quick Actions")
-        
-        if st.button("🔄 Refresh Employee Data", use_container_width=True):
-            st.cache_data.clear()
-            st.success("✅ Employee data refreshed!")
-            st.rerun()
-        
-        if st.button("📋 View Sample Data", use_container_width=True):
-            st.info("📋 Showing first 5 demo employees")
-            sample_df = load_employee_data().head()
-            st.dataframe(sample_df, use_container_width=True)
-    
-    # Setup instructions
-    show_google_sheets_setup()
+        # ---- Normalization (same as before) ----
+        if 'Employee ID' in df.columns:
+            df = df[(df['Employee ID'] != 0) & (df['Employee ID'] != '')]
+            try:
+                df['Employee ID'] = pd.to_numeric(df['Employee ID'], errors='coerce').astype('Int64')
+            except Exception:
+                pass
+
+        if 'Salary' in df.columns:
+            df['Salary'] = pd.to_numeric(df['Salary'], errors='coerce')
+            df = df.dropna(subset=['Salary'])
+
+        for col in ['Employee Name', 'Designation', 'BaseLocation', 'PAN No.']:
+            if col in df.columns:
+                df[col] = df[col].fillna('').astype(str)
+
+        maybe_numeric_cols = [
+            'EPF Rate','PF Rate','EPF Wages','PF Wages','EPF Full Month',
+            'EPF Fixed','EPF Fixed Deduction','PF Wage Cap','EPF','PF',
+            'PF Deduction','EPF Deduction','Employee EPF','EPF Employee',
+            'PF Employee','Total EPF','EPF Amount','EPF Per Month','Employee PF Contribution',
+            'PF Amount','PF Per Month'
+        ]
+        for cname in maybe_numeric_cols:
+            if cname in df.columns:
+                df[cname] = pd.to_numeric(df[cname].astype(str).str.replace(',', ''), errors='coerce')
+
+        for cname in ['EPF Applicable','PF Applicable','EPF Capped','PF Capped']:
+            if cname in df.columns:
+                df[cname] = df[cname].astype(str)
+
+        return df
+
+    except Exception as e:
+        st.error(f"Google Sheets error: {e}")
+        st.stop()
 
 def get_employee_by_id(employee_id, df):
     """Get employee details by ID"""
@@ -1616,7 +1495,7 @@ def save_fnf_data():
         st.warning(f"Could not save F&F data: {e}")
 
 def create_analytics_charts():
-    """Create analytics charts using Streamlit built-in charts only"""
+    """Create enhanced analytics charts"""
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
         st.markdown("""
         <div class="info-card">
@@ -1627,129 +1506,85 @@ def create_analytics_charts():
 
     submissions = st.session_state.fnf_submissions
     
-    # Status Distribution
-    st.markdown("### 📊 F&F Analytics Dashboard")
-    
+    # Status Distribution Pie Chart
     status_counts = {}
-    net_payables = []
-    tax_regimes = {}
-    total_amounts_by_regime = {}
-    
     for sub in submissions:
-        # Status counts
         status = sub['status']
         status_counts[status] = status_counts.get(status, 0) + 1
-        
-        # Net payables for distribution
-        if sub.get('net_payable', 0) > 0:
-            net_payables.append(sub['net_payable'])
-        
-        # Tax regime analysis
-        regime = sub.get('tax_regime', 'Unknown')
-        tax_regimes[regime] = tax_regimes.get(regime, 0) + 1
-        total_amounts_by_regime[regime] = total_amounts_by_regime.get(regime, 0) + sub.get('net_payable', 0)
     
-    # Display analytics in columns
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if status_counts:
-            st.markdown("#### 📈 F&F Status Distribution")
-            status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
-            st.bar_chart(status_df.set_index('Status'))
-            
-            # Status summary
-            st.markdown("**Status Summary:**")
-            for status, count in status_counts.items():
-                percentage = (count / len(submissions)) * 100
-                st.markdown(f"• **{status}:** {count} ({percentage:.1f}%)")
-    
-    with col2:
-        if net_payables:
-            st.markdown("#### 💰 Net Payable Analysis")
-            
-            # Basic statistics
-            avg_amount = sum(net_payables) / len(net_payables)
-            max_amount = max(net_payables)
-            min_amount = min(net_payables)
-            total_amount = sum(net_payables)
-            
-            # Create metrics
-            metric_col1, metric_col2 = st.columns(2)
-            with metric_col1:
-                st.metric("Average", f"₹{avg_amount:,.0f}")
-                st.metric("Maximum", f"₹{max_amount:,.0f}")
-            with metric_col2:
-                st.metric("Minimum", f"₹{min_amount:,.0f}")
-                st.metric("Total", f"₹{total_amount:,.0f}")
-            
-            # Simple line chart of amounts
-            amounts_df = pd.DataFrame({'Net Payable': net_payables})
-            st.line_chart(amounts_df)
-    
-    # Tax Regime Analysis
-    if len(tax_regimes) > 1:
-        st.markdown("---")
-        st.markdown("### 🏛️ Tax Regime Analysis")
-        
+    if status_counts:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 📊 Tax Regime Usage")
-            regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
-            st.bar_chart(regime_df.set_index('Tax Regime'))
-            
-            # Regime summary
-            for regime, count in tax_regimes.items():
-                percentage = (count / len(submissions)) * 100
-                st.markdown(f"• **{regime}:** {count} ({percentage:.1f}%)")
+            fig_pie = px.pie(
+                values=list(status_counts.values()),
+                names=list(status_counts.keys()),
+                title="📊 F&F Status Distribution",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pie.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
         
         with col2:
-            st.markdown("#### 💸 Total Amounts by Tax Regime")
-            amounts_df = pd.DataFrame(list(total_amounts_by_regime.items()), columns=['Tax Regime', 'Total Amount'])
-            st.bar_chart(amounts_df.set_index('Tax Regime'))
-            
-            # Amount summary
-            for regime, amount in total_amounts_by_regime.items():
-                st.markdown(f"• **{regime}:** ₹{amount:,.0f}")
+            # Net Payable Distribution
+            amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
+            if amounts:
+                fig_hist = px.histogram(
+                    x=amounts,
+                    title="💰 Net Payable Distribution",
+                    labels={'x': 'Net Payable (₹)', 'y': 'Count'},
+                    color_discrete_sequence=['#667eea']
+                )
+                fig_hist.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
     
-    # Additional insights
-    st.markdown("---")
-    st.markdown("### 🔍 Key Insights")
+    # Tax Regime Analysis
+    tax_regimes = {}
+    total_amounts = {}
+    for sub in submissions:
+        regime = sub.get('tax_regime', 'Unknown')
+        tax_regimes[regime] = tax_regimes.get(regime, 0) + 1
+        total_amounts[regime] = total_amounts.get(regime, 0) + sub.get('net_payable', 0)
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        create_enhanced_metric_card(
-            "Total Submissions", 
-            len(submissions), 
-            icon="📋"
-        )
-    
-    with col2:
-        pending_count = sum(1 for s in submissions if s['status'] in ['Under Tax Review', 'Pending Tax Review'])
-        create_enhanced_metric_card(
-            "Pending Review", 
-            pending_count, 
-            delta=f"{(pending_count/len(submissions)*100):.1f}% of total",
-            icon="⏳"
-        )
-    
-    with col3:
-        processed_count = sum(1 for s in submissions if s['status'] == 'Payment Processed')
-        create_enhanced_metric_card(
-            "Completed", 
-            processed_count, 
-            delta=f"{(processed_count/len(submissions)*100):.1f}% of total",
-            icon="✅"
-        )
-    
-    # Monthly trend (if we have submission dates)
-    if submissions and any('submission_date' in sub for sub in submissions):
-        st.markdown("### 📅 Monthly Trends")
-        # This would be implemented if we add submission dates to the data structure
-        st.info("📅 Monthly trend analysis available when submission dates are tracked")
+    if len(tax_regimes) > 1:
+        col1, col2 = st.columns(2)
         
+        with col1:
+            fig_regime = px.bar(
+                x=list(tax_regimes.keys()),
+                y=list(tax_regimes.values()),
+                title="🏛️ Tax Regime Preference",
+                labels={'x': 'Tax Regime', 'y': 'Count'},
+                color=list(tax_regimes.values()),
+                color_continuous_scale='Blues'
+            )
+            fig_regime.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_regime, use_container_width=True)
+        
+        with col2:
+            fig_amounts = px.bar(
+                x=list(total_amounts.keys()),
+                y=list(total_amounts.values()),
+                title="💸 Total Amounts by Tax Regime",
+                labels={'x': 'Tax Regime', 'y': 'Total Amount (₹)'},
+                color=list(total_amounts.values()),
+                color_continuous_scale='Greens'
+            )
+            fig_amounts.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_amounts, use_container_width=True)
+
 def fnf_settlement_form():
     """Enhanced F&F Settlement Form with better styling"""
     st.markdown("""
@@ -2547,9 +2382,9 @@ def payroll_dashboard():
             # Enhanced search
             col1, col2 = st.columns([2, 1])
             with col1:
-                search_term = st.text_input("🔍 Search Employee (ID or Name)", placeholder="Enter employee ID or name...", key="payroll_search_employee")
+                search_term = st.text_input("🔍 Search Employee (ID or Name)", placeholder="Enter employee ID or name...")
             with col2:
-                show_all = st.checkbox("Show All Employees", value=False, key="payroll_show_all_employees")
+                show_all = st.checkbox("Show All Employees", value=False)
             
             if search_term or show_all:
                 if search_term and not show_all:
@@ -2620,7 +2455,7 @@ def payroll_dashboard():
             st.markdown("---")
             
             # Individual submissions
-            for idx, submission in enumerate(st.session_state.fnf_submissions):
+            for submission in st.session_state.fnf_submissions:
                 status_badge = create_status_badge(submission['status'])
                 
                 with st.expander(f"{submission['employee_name']} - {submission['status']}", expanded=False):
@@ -2664,7 +2499,7 @@ def payroll_dashboard():
                     
                     with col3:
                         if submission['status'] == 'Tax Approved':
-                            if st.button(f"💰 Process Payment", key=f"payroll_pay_{submission['employee_id']}_{idx}"):
+                            if st.button(f"💰 Process Payment", key=f"pay_{submission['employee_id']}"):
                                 submission['status'] = 'Payment Processed'
                                 submission['payment_processed_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
                                 save_fnf_data()  # Save to file
@@ -2672,7 +2507,7 @@ def payroll_dashboard():
                                 st.rerun()
                         
                         elif submission['status'] == 'Tax Rejected':
-                            if st.button(f"📝 Edit & Resubmit", key=f"payroll_edit_{submission['employee_id']}_{idx}"):
+                            if st.button(f"📝 Edit & Resubmit", key=f"edit_{submission['employee_id']}"):
                                 st.info("Go to F&F Settlement tab to edit")
                     
                     # Show investment details for Old Tax Regime
@@ -2751,10 +2586,10 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("📤 Export All F&F Data", use_container_width=True, key="payroll_export_fnf_data"):
+            if st.button("📤 Export All F&F Data", use_container_width=True):
                 st.info("📊 F&F data export functionality ready for implementation")
             
-            if st.button("📥 Import Employee Data", use_container_width=True, key="payroll_import_employee_data"):
+            if st.button("📥 Import Employee Data", use_container_width=True):
                 st.info("📥 Employee data import functionality ready for implementation")
         
         with col2:
@@ -2764,12 +2599,12 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("🔄 Refresh Data", use_container_width=True, key="payroll_refresh_data"):
+            if st.button("🔄 Refresh Data", use_container_width=True):
                 st.cache_data.clear()
                 st.success("✅ Data refreshed successfully!")
                 st.rerun()
             
-            if st.button("📊 Generate Report", use_container_width=True, key="payroll_generate_report"):
+            if st.button("📊 Generate Report", use_container_width=True):
                 st.info("📊 Report generation functionality ready")
         
         with col3:
@@ -2779,41 +2614,12 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("⚙️ System Settings", use_container_width=True, key="payroll_system_settings"):
+            if st.button("⚙️ System Settings", use_container_width=True):
                 st.info("⚙️ System settings panel ready for configuration")
             
-            if st.button("📋 View Logs", use_container_width=True, key="payroll_view_logs"):
+            if st.button("📋 View Logs", use_container_width=True):
                 st.info("📋 System logs viewer ready for implementation")
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Data Source Status")
-        
-        if GOOGLE_SHEETS_AVAILABLE and 'gcp_service_account' in st.secrets:
-            create_enhanced_metric_card("Google Sheets", "Connected", delta="✅ Active", icon="📊")
-        else:
-            create_enhanced_metric_card("Google Sheets", "Demo Mode", delta="⚠️ Not configured", icon="📊")
-        
-        employee_df = load_employee_data()
-        create_enhanced_metric_card("Employee Records", len(employee_df), icon="👥")
-    
-    with col2:
-        st.markdown("### 🔧 Quick Actions")
-        
-        if st.button("🔄 Refresh Employee Data", use_container_width=True):
-            st.cache_data.clear()
-            st.success("✅ Employee data refreshed!")
-            st.rerun()
-        
-        if st.button("📋 View Sample Data", use_container_width=True):
-            st.info("📋 Showing first 5 demo employees")
-            sample_df = load_employee_data().head()
-            st.dataframe(sample_df, use_container_width=True)
-    
-    # Setup instructions
-    show_google_sheets_setup()
-    
 def login():
     """Enhanced login page with professional styling"""
     
