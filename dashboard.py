@@ -805,36 +805,6 @@ with tab6:
     # Setup instructions
     show_google_sheets_setup()
 
-Login with demo accounts:
-
-Username: demo_payroll / Password: demo123
-Username: demo_tax / Password: demo123
-Test with demo Employee IDs:
-
-1001, 1002, 1003, 1004, 1005, etc.
-Complete F&F workflow:
-
-Create settlements
-Send to tax team
-Review and approve
-Process payments
-✅ Deploy the Fix:
-Update your code with the fixes above
-Push to GitHub:
-Copygit add .
-git commit -m "Fix: Add demo data fallback for Google Sheets"
-git push
-Streamlit Cloud will auto-redeploy
-The app will now work perfectly even without Google Sheets configuration, using comprehensive demo data that allows full testing of all features!
-
-Copy
-Deep Research
-ModuleNotFoundError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
-Traceback:
-File "/mount/src/fnf-settlement-system/dashboard.py", line 11, in <module>
-    import plotly.express as px
-The issue is still with the Plotly import. Let's completely rem
-
 def get_employee_by_id(employee_id, df):
     """Get employee details by ID"""
     try:
