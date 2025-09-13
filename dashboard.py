@@ -1495,7 +1495,7 @@ def save_fnf_data():
         st.warning(f"Could not save F&F data: {e}")
 
 def create_analytics_charts():
-    """Create analytics charts using Streamlit built-in charts"""
+    """Create enhanced analytics charts"""
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
         st.markdown("""
         <div class="info-card">
@@ -1506,7 +1506,7 @@ def create_analytics_charts():
 
     submissions = st.session_state.fnf_submissions
     
-    # Status Distribution
+    # Status Distribution Pie Chart
     status_counts = {}
     for sub in submissions:
         status = sub['status']
@@ -1516,15 +1516,33 @@ def create_analytics_charts():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 📊 F&F Status Distribution")
-            status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
-            st.bar_chart(status_df.set_index('Status'))
+            fig_pie = px.pie(
+                values=list(status_counts.values()),
+                names=list(status_counts.keys()),
+                title="📊 F&F Status Distribution",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pie.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
         
         with col2:
-            st.markdown("#### 💰 Net Payable Distribution")
+            # Net Payable Distribution
             amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
             if amounts:
-                st.line_chart(pd.DataFrame({'Amount': amounts}))
+                fig_hist = px.histogram(
+                    x=amounts,
+                    title="💰 Net Payable Distribution",
+                    labels={'x': 'Net Payable (₹)', 'y': 'Count'},
+                    color_discrete_sequence=['#667eea']
+                )
+                fig_hist.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
     
     # Tax Regime Analysis
     tax_regimes = {}
@@ -1538,14 +1556,34 @@ def create_analytics_charts():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 🏛️ Tax Regime Preference")
-            regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
-            st.bar_chart(regime_df.set_index('Tax Regime'))
+            fig_regime = px.bar(
+                x=list(tax_regimes.keys()),
+                y=list(tax_regimes.values()),
+                title="🏛️ Tax Regime Preference",
+                labels={'x': 'Tax Regime', 'y': 'Count'},
+                color=list(tax_regimes.values()),
+                color_continuous_scale='Blues'
+            )
+            fig_regime.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_regime, use_container_width=True)
         
         with col2:
-            st.markdown("#### 💸 Total Amounts by Tax Regime")
-            amounts_df = pd.DataFrame(list(total_amounts.items()), columns=['Tax Regime', 'Total Amount'])
-            st.bar_chart(amounts_df.set_index('Tax Regime'))
+            fig_amounts = px.bar(
+                x=list(total_amounts.keys()),
+                y=list(total_amounts.values()),
+                title="💸 Total Amounts by Tax Regime",
+                labels={'x': 'Tax Regime', 'y': 'Total Amount (₹)'},
+                color=list(total_amounts.values()),
+                color_continuous_scale='Greens'
+            )
+            fig_amounts.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig_amounts, use_container_width=True)
 
 def fnf_settlement_form():
     """Enhanced F&F Settlement Form with better styling"""
