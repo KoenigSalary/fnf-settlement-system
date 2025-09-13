@@ -765,13 +765,8 @@ def show_google_sheets_setup():
         <p><strong>Google Sheets:</strong> {'✅ Connected' if GOOGLE_SHEETS_AVAILABLE and 'gcp_service_account' in st.secrets else '❌ Not configured (using demo data)'}</p>
     </div>
     """, unsafe_allow_html=True)
-🔧 Fix 4: Add Setup Tab to Dashboard
-Add this to your payroll dashboard:
-
-Copy# In your payroll_dashboard function, add a new tab:
+    
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 Employee Master", "📋 F&F Settlement", "📊 F&F Status", "📈 Analytics", "🎯 Quick Actions", "⚙️ Setup"])
-
-# ... your existing tabs ...
 
 with tab6:
     st.markdown("""
