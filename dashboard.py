@@ -1493,7 +1493,7 @@ def save_fnf_data():
         st.warning(f"Could not save F&F data: {e}")
 
 def create_analytics_charts():
-    """Create enhanced analytics charts"""
+    """Create analytics charts using Streamlit built-in charts only"""
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
         st.markdown("""
         <div class="info-card">
@@ -1504,85 +1504,129 @@ def create_analytics_charts():
 
     submissions = st.session_state.fnf_submissions
     
-    # Status Distribution Pie Chart
+    # Status Distribution
+    st.markdown("### 📊 F&F Analytics Dashboard")
+    
     status_counts = {}
+    net_payables = []
+    tax_regimes = {}
+    total_amounts_by_regime = {}
+    
     for sub in submissions:
+        # Status counts
         status = sub['status']
         status_counts[status] = status_counts.get(status, 0) + 1
-    
-    if status_counts:
-        col1, col2 = st.columns(2)
         
-        with col1:
-            fig_pie = px.pie(
-                values=list(status_counts.values()),
-                names=list(status_counts.keys()),
-                title="📊 F&F Status Distribution",
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            fig_pie.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+        # Net payables for distribution
+        if sub.get('net_payable', 0) > 0:
+            net_payables.append(sub['net_payable'])
         
-        with col2:
-            # Net Payable Distribution
-            amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
-            if amounts:
-                fig_hist = px.histogram(
-                    x=amounts,
-                    title="💰 Net Payable Distribution",
-                    labels={'x': 'Net Payable (₹)', 'y': 'Count'},
-                    color_discrete_sequence=['#667eea']
-                )
-                fig_hist.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
-    
-    # Tax Regime Analysis
-    tax_regimes = {}
-    total_amounts = {}
-    for sub in submissions:
+        # Tax regime analysis
         regime = sub.get('tax_regime', 'Unknown')
         tax_regimes[regime] = tax_regimes.get(regime, 0) + 1
-        total_amounts[regime] = total_amounts.get(regime, 0) + sub.get('net_payable', 0)
+        total_amounts_by_regime[regime] = total_amounts_by_regime.get(regime, 0) + sub.get('net_payable', 0)
     
+    # Display analytics in columns
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if status_counts:
+            st.markdown("#### 📈 F&F Status Distribution")
+            status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
+            st.bar_chart(status_df.set_index('Status'))
+            
+            # Status summary
+            st.markdown("**Status Summary:**")
+            for status, count in status_counts.items():
+                percentage = (count / len(submissions)) * 100
+                st.markdown(f"• **{status}:** {count} ({percentage:.1f}%)")
+    
+    with col2:
+        if net_payables:
+            st.markdown("#### 💰 Net Payable Analysis")
+            
+            # Basic statistics
+            avg_amount = sum(net_payables) / len(net_payables)
+            max_amount = max(net_payables)
+            min_amount = min(net_payables)
+            total_amount = sum(net_payables)
+            
+            # Create metrics
+            metric_col1, metric_col2 = st.columns(2)
+            with metric_col1:
+                st.metric("Average", f"₹{avg_amount:,.0f}")
+                st.metric("Maximum", f"₹{max_amount:,.0f}")
+            with metric_col2:
+                st.metric("Minimum", f"₹{min_amount:,.0f}")
+                st.metric("Total", f"₹{total_amount:,.0f}")
+            
+            # Simple line chart of amounts
+            amounts_df = pd.DataFrame({'Net Payable': net_payables})
+            st.line_chart(amounts_df)
+    
+    # Tax Regime Analysis
     if len(tax_regimes) > 1:
+        st.markdown("---")
+        st.markdown("### 🏛️ Tax Regime Analysis")
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            fig_regime = px.bar(
-                x=list(tax_regimes.keys()),
-                y=list(tax_regimes.values()),
-                title="🏛️ Tax Regime Preference",
-                labels={'x': 'Tax Regime', 'y': 'Count'},
-                color=list(tax_regimes.values()),
-                color_continuous_scale='Blues'
-            )
-            fig_regime.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_regime, use_container_width=True)
+            st.markdown("#### 📊 Tax Regime Usage")
+            regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
+            st.bar_chart(regime_df.set_index('Tax Regime'))
+            
+            # Regime summary
+            for regime, count in tax_regimes.items():
+                percentage = (count / len(submissions)) * 100
+                st.markdown(f"• **{regime}:** {count} ({percentage:.1f}%)")
         
         with col2:
-            fig_amounts = px.bar(
-                x=list(total_amounts.keys()),
-                y=list(total_amounts.values()),
-                title="💸 Total Amounts by Tax Regime",
-                labels={'x': 'Tax Regime', 'y': 'Total Amount (₹)'},
-                color=list(total_amounts.values()),
-                color_continuous_scale='Greens'
-            )
-            fig_amounts.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_amounts, use_container_width=True)
-
+            st.markdown("#### 💸 Total Amounts by Tax Regime")
+            amounts_df = pd.DataFrame(list(total_amounts_by_regime.items()), columns=['Tax Regime', 'Total Amount'])
+            st.bar_chart(amounts_df.set_index('Tax Regime'))
+            
+            # Amount summary
+            for regime, amount in total_amounts_by_regime.items():
+                st.markdown(f"• **{regime}:** ₹{amount:,.0f}")
+    
+    # Additional insights
+    st.markdown("---")
+    st.markdown("### 🔍 Key Insights")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        create_enhanced_metric_card(
+            "Total Submissions", 
+            len(submissions), 
+            icon="📋"
+        )
+    
+    with col2:
+        pending_count = sum(1 for s in submissions if s['status'] in ['Under Tax Review', 'Pending Tax Review'])
+        create_enhanced_metric_card(
+            "Pending Review", 
+            pending_count, 
+            delta=f"{(pending_count/len(submissions)*100):.1f}% of total",
+            icon="⏳"
+        )
+    
+    with col3:
+        processed_count = sum(1 for s in submissions if s['status'] == 'Payment Processed')
+        create_enhanced_metric_card(
+            "Completed", 
+            processed_count, 
+            delta=f"{(processed_count/len(submissions)*100):.1f}% of total",
+            icon="✅"
+        )
+    
+    # Monthly trend (if we have submission dates)
+    if submissions and any('submission_date' in sub for sub in submissions):
+        st.markdown("### 📅 Monthly Trends")
+        # This would be implemented if we add submission dates to the data structure
+        st.info("📅 Monthly trend analysis available when submission dates are tracked")
+        
 def fnf_settlement_form():
     """Enhanced F&F Settlement Form with better styling"""
     st.markdown("""
