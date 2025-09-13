@@ -8,6 +8,8 @@ from dateutil.relativedelta import relativedelta
 import re
 import hashlib
 import random
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Environment variables
 rms_user = os.getenv('RMS_USER')
