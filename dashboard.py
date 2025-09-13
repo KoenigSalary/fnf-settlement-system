@@ -8,21 +8,10 @@ from dateutil.relativedelta import relativedelta
 import re
 import hashlib
 import random
-import plotly.express as px
-import plotly.graph_objects as go
 
 # Environment variables
 rms_user = os.getenv('RMS_USER')
 rms_pass = os.getenv('RMS_PASS')
-
-# Optional plotly import with fallback
-try:
-    import plotly.express as px
-    import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-    st.warning("Plotly not available. Analytics charts will be limited.")
 
 # Try to import Google Sheets dependencies
 try:
@@ -1504,7 +1493,7 @@ def save_fnf_data():
         st.warning(f"Could not save F&F data: {e}")
 
 def create_analytics_charts():
-    """Create enhanced analytics charts with plotly fallback"""
+    """Create analytics charts using Streamlit built-in charts"""
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
         st.markdown("""
         <div class="info-card">
@@ -1515,56 +1504,7 @@ def create_analytics_charts():
 
     submissions = st.session_state.fnf_submissions
     
-    if not PLOTLY_AVAILABLE:
-        # Fallback to basic Streamlit charts
-        st.markdown("### 📊 Basic Analytics (Plotly not available)")
-        
-        # Status Distribution
-        status_counts = {}
-        for sub in submissions:
-            status = sub['status']
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        if status_counts:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 📊 Status Distribution")
-                status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
-                st.bar_chart(status_df.set_index('Status'))
-            
-            with col2:
-                st.markdown("#### 💰 Net Payable Amounts")
-                amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
-                if amounts:
-                    amounts_df = pd.DataFrame({'Net Payable': amounts})
-                    st.line_chart(amounts_df)
-        
-        # Tax Regime Analysis
-        tax_regimes = {}
-        total_amounts = {}
-        for sub in submissions:
-            regime = sub.get('tax_regime', 'Unknown')
-            tax_regimes[regime] = tax_regimes.get(regime, 0) + 1
-            total_amounts[regime] = total_amounts.get(regime, 0) + sub.get('net_payable', 0)
-        
-        if len(tax_regimes) > 1:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 🏛️ Tax Regime Usage")
-                regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
-                st.bar_chart(regime_df.set_index('Tax Regime'))
-            
-            with col2:
-                st.markdown("#### 💸 Amounts by Tax Regime")
-                amounts_df = pd.DataFrame(list(total_amounts.items()), columns=['Tax Regime', 'Total Amount'])
-                st.bar_chart(amounts_df.set_index('Tax Regime'))
-        
-        return
-
-    # Original plotly charts (when plotly is available)
-    # Status Distribution Pie Chart
+    # Status Distribution
     status_counts = {}
     for sub in submissions:
         status = sub['status']
@@ -1574,33 +1514,15 @@ def create_analytics_charts():
         col1, col2 = st.columns(2)
         
         with col1:
-            fig_pie = px.pie(
-                values=list(status_counts.values()),
-                names=list(status_counts.keys()),
-                title="📊 F&F Status Distribution",
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            fig_pie.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.markdown("#### 📊 F&F Status Distribution")
+            status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
+            st.bar_chart(status_df.set_index('Status'))
         
         with col2:
-            # Net Payable Distribution
+            st.markdown("#### 💰 Net Payable Distribution")
             amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
             if amounts:
-                fig_hist = px.histogram(
-                    x=amounts,
-                    title="💰 Net Payable Distribution",
-                    labels={'x': 'Net Payable (₹)', 'y': 'Count'},
-                    color_discrete_sequence=['#667eea']
-                )
-                fig_hist.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.line_chart(pd.DataFrame({'Amount': amounts}))
     
     # Tax Regime Analysis
     tax_regimes = {}
@@ -1614,34 +1536,14 @@ def create_analytics_charts():
         col1, col2 = st.columns(2)
         
         with col1:
-            fig_regime = px.bar(
-                x=list(tax_regimes.keys()),
-                y=list(tax_regimes.values()),
-                title="🏛️ Tax Regime Preference",
-                labels={'x': 'Tax Regime', 'y': 'Count'},
-                color=list(tax_regimes.values()),
-                color_continuous_scale='Blues'
-            )
-            fig_regime.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_regime, use_container_width=True)
+            st.markdown("#### 🏛️ Tax Regime Preference")
+            regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
+            st.bar_chart(regime_df.set_index('Tax Regime'))
         
         with col2:
-            fig_amounts = px.bar(
-                x=list(total_amounts.keys()),
-                y=list(total_amounts.values()),
-                title="💸 Total Amounts by Tax Regime",
-                labels={'x': 'Tax Regime', 'y': 'Total Amount (₹)'},
-                color=list(total_amounts.values()),
-                color_continuous_scale='Greens'
-            )
-            fig_amounts.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-            )
-            st.plotly_chart(fig_amounts, use_container_width=True)
+            st.markdown("#### 💸 Total Amounts by Tax Regime")
+            amounts_df = pd.DataFrame(list(total_amounts.items()), columns=['Tax Regime', 'Total Amount'])
+            st.bar_chart(amounts_df.set_index('Tax Regime'))
 
 def fnf_settlement_form():
     """Enhanced F&F Settlement Form with better styling"""
