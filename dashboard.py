@@ -2547,9 +2547,9 @@ def payroll_dashboard():
             # Enhanced search
             col1, col2 = st.columns([2, 1])
             with col1:
-                search_term = st.text_input("🔍 Search Employee (ID or Name)", placeholder="Enter employee ID or name...")
+                search_term = st.text_input("🔍 Search Employee (ID or Name)", placeholder="Enter employee ID or name...", key="payroll_search_employee")
             with col2:
-                show_all = st.checkbox("Show All Employees", value=False)
+                show_all = st.checkbox("Show All Employees", value=False, key="payroll_show_all_employees")
             
             if search_term or show_all:
                 if search_term and not show_all:
@@ -2620,7 +2620,7 @@ def payroll_dashboard():
             st.markdown("---")
             
             # Individual submissions
-            for submission in st.session_state.fnf_submissions:
+            for idx, submission in enumerate(st.session_state.fnf_submissions):
                 status_badge = create_status_badge(submission['status'])
                 
                 with st.expander(f"{submission['employee_name']} - {submission['status']}", expanded=False):
@@ -2664,7 +2664,7 @@ def payroll_dashboard():
                     
                     with col3:
                         if submission['status'] == 'Tax Approved':
-                            if st.button(f"💰 Process Payment", key=f"pay_{submission['employee_id']}"):
+                            if st.button(f"💰 Process Payment", key=f"payroll_pay_{submission['employee_id']}_{idx}"):
                                 submission['status'] = 'Payment Processed'
                                 submission['payment_processed_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
                                 save_fnf_data()  # Save to file
@@ -2672,7 +2672,7 @@ def payroll_dashboard():
                                 st.rerun()
                         
                         elif submission['status'] == 'Tax Rejected':
-                            if st.button(f"📝 Edit & Resubmit", key=f"edit_{submission['employee_id']}"):
+                            if st.button(f"📝 Edit & Resubmit", key=f"payroll_edit_{submission['employee_id']}_{idx}"):
                                 st.info("Go to F&F Settlement tab to edit")
                     
                     # Show investment details for Old Tax Regime
@@ -2751,10 +2751,10 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("📤 Export All F&F Data", use_container_width=True):
+            if st.button("📤 Export All F&F Data", use_container_width=True, key="payroll_export_fnf_data"):
                 st.info("📊 F&F data export functionality ready for implementation")
             
-            if st.button("📥 Import Employee Data", use_container_width=True):
+            if st.button("📥 Import Employee Data", use_container_width=True, key="payroll_import_employee_data"):
                 st.info("📥 Employee data import functionality ready for implementation")
         
         with col2:
@@ -2764,12 +2764,12 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("🔄 Refresh Data", use_container_width=True):
+            if st.button("🔄 Refresh Data", use_container_width=True, key="payroll_refresh_data"):
                 st.cache_data.clear()
                 st.success("✅ Data refreshed successfully!")
                 st.rerun()
             
-            if st.button("📊 Generate Report", use_container_width=True):
+            if st.button("📊 Generate Report", use_container_width=True, key="payroll_generate_report"):
                 st.info("📊 Report generation functionality ready")
         
         with col3:
@@ -2779,25 +2779,12 @@ def payroll_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("⚙️ System Settings", use_container_width=True):
+            if st.button("⚙️ System Settings", use_container_width=True, key="payroll_system_settings"):
                 st.info("⚙️ System settings panel ready for configuration")
             
-            if st.button("📋 View Logs", use_container_width=True):
+            if st.button("📋 View Logs", use_container_width=True, key="payroll_view_logs"):
                 st.info("📋 System logs viewer ready for implementation")
 
-# In your payroll_dashboard function, add a new tab:
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 Employee Master", "📋 F&F Settlement", "📊 F&F Status", "📈 Analytics", "🎯 Quick Actions", "⚙️ Setup"])
-
-# ... your existing tabs ...
-
-with tab6:
-    st.markdown("""
-    <div class="employee-card">
-        <h3>⚙️ System Setup & Configuration</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Google Sheets status
     col1, col2 = st.columns(2)
     
     with col1:
