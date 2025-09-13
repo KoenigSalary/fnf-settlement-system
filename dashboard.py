@@ -15,6 +15,15 @@ import plotly.graph_objects as go
 rms_user = os.getenv('RMS_USER')
 rms_pass = os.getenv('RMS_PASS')
 
+# Optional plotly import with fallback
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("Plotly not available. Analytics charts will be limited.")
+
 # Try to import Google Sheets dependencies
 try:
     import gspread
@@ -1495,7 +1504,7 @@ def save_fnf_data():
         st.warning(f"Could not save F&F data: {e}")
 
 def create_analytics_charts():
-    """Create enhanced analytics charts"""
+    """Create enhanced analytics charts with plotly fallback"""
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
         st.markdown("""
         <div class="info-card">
@@ -1506,6 +1515,55 @@ def create_analytics_charts():
 
     submissions = st.session_state.fnf_submissions
     
+    if not PLOTLY_AVAILABLE:
+        # Fallback to basic Streamlit charts
+        st.markdown("### 📊 Basic Analytics (Plotly not available)")
+        
+        # Status Distribution
+        status_counts = {}
+        for sub in submissions:
+            status = sub['status']
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        if status_counts:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📊 Status Distribution")
+                status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
+                st.bar_chart(status_df.set_index('Status'))
+            
+            with col2:
+                st.markdown("#### 💰 Net Payable Amounts")
+                amounts = [sub['net_payable'] for sub in submissions if sub.get('net_payable', 0) > 0]
+                if amounts:
+                    amounts_df = pd.DataFrame({'Net Payable': amounts})
+                    st.line_chart(amounts_df)
+        
+        # Tax Regime Analysis
+        tax_regimes = {}
+        total_amounts = {}
+        for sub in submissions:
+            regime = sub.get('tax_regime', 'Unknown')
+            tax_regimes[regime] = tax_regimes.get(regime, 0) + 1
+            total_amounts[regime] = total_amounts.get(regime, 0) + sub.get('net_payable', 0)
+        
+        if len(tax_regimes) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🏛️ Tax Regime Usage")
+                regime_df = pd.DataFrame(list(tax_regimes.items()), columns=['Tax Regime', 'Count'])
+                st.bar_chart(regime_df.set_index('Tax Regime'))
+            
+            with col2:
+                st.markdown("#### 💸 Amounts by Tax Regime")
+                amounts_df = pd.DataFrame(list(total_amounts.items()), columns=['Tax Regime', 'Total Amount'])
+                st.bar_chart(amounts_df.set_index('Tax Regime'))
+        
+        return
+
+    # Original plotly charts (when plotly is available)
     # Status Distribution Pie Chart
     status_counts = {}
     for sub in submissions:
