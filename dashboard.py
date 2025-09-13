@@ -804,8 +804,6 @@ with tab6:
     
     # Setup instructions
     show_google_sheets_setup()
-🔧 Fix 5: Test with Demo Data
-The system should now work perfectly with demo data. You can:
 
 Login with demo accounts:
 
