@@ -1,0 +1,11 @@
+# Data files - don't upload to GitHub
+users.json
+fnf_submissions.json
+credentials.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment
+.env
