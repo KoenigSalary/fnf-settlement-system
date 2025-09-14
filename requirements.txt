@@ -1,64 +1,24 @@
-altair==5.5.0
-attrs==25.3.0
-blinker==1.9.0
-cachetools==5.5.2
-certifi==2025.8.3
-charset-normalizer==3.4.3
-click==8.2.1
-gitdb==4.0.12
-GitPython==3.1.45
-google-auth==2.23.4
-google-auth-httplib2==0.1.1
-google-auth-oauthlib==1.0.0
-gspread==5.12.0
-httplib2==0.30.0
-idna==3.10
-importlib-metadata==6.11.0
-Jinja2==3.1.6
-jsonschema==4.25.1
-jsonschema-specifications==2025.9.1
-markdown-it-py==4.0.0
-MarkupSafe==3.0.2
-mdurl==0.1.2
-narwhals==2.4.0
-numpy==1.24.3
-oauthlib==3.3.1
-packaging==23.2
-pandas==2.0.3
-pillow==10.4.0
-protobuf==4.25.8
-pyarrow==21.0.0
-pyasn1==0.6.1
-pyasn1_modules==0.4.2
-pydeck==0.9.1
-Pygments==2.19.2
-pyparsing==3.2.3
-python-dateutil==2.8.2
-pytz==2025.2
-referencing==0.36.2
-requests==2.32.5
-requests-oauthlib==2.0.0
-rich==13.9.4
-rpds-py==0.27.1
-rsa==4.9.1
-six==1.17.0
-smmap==5.0.2
-streamlit==1.29.0
-tenacity==8.5.0
-toml==0.10.2
-tornado==6.5.2
-typing_extensions==4.15.0
-tzdata==2025.2
-tzlocal==5.3.1
-urllib3==2.5.0
-validators==0.35.0
-zipp==3.23.0
-plotly
-streamlit>=1.28.0
-pandas>=2.0.0
-plotly>=5.0.0
-gspread>=5.0.0
-google-auth>=2.0.0
-python-dateutil>=2.8.0
-numpy>=1.26.0
+# F&F Settlement System Requirements
+# Python 3.13 Compatible Version
 
+# Core data processing
+numpy>=1.26.0
+pandas>=2.0.0
+
+# Web framework
+streamlit>=1.28.0
+
+# Google Sheets integration
+gspread>=5.12.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.2.0
+
+# Additional utilities that might be needed
+requests>=2.31.0
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Optional but commonly used
+python-dateutil>=2.8.0
+pytz>=2023.3
