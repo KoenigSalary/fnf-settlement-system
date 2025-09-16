@@ -874,6 +874,8 @@ def tds_new_from_total_income(total_income: float) -> float:
     return round(tax * 1.04, 2)
 
 def calculate_years_of_service(doj_str, last_working_day):
+    """Calculate years of service from DOJ to
+def calculate_years_of_service(doj_str, last_working_day):
     """Calculate years of service from DOJ to last working day"""
     try:
         # Parse DOJ (assuming format like "01/01/93" or "01/01/1993")
@@ -1582,17 +1584,16 @@ def create_analytics_charts():
             st.plotly_chart(fig_amounts, use_container_width=True)
 
 def fnf_settlement_form():
-    """Enhanced F&F Settlement Form with better styling"""
+    """Enhanced F&F Settlement Form (Payroll view) — tax investments removed from here"""
     st.markdown("""
     <div class="main-header">
         <h1>📋 Full & Final Settlement Form</h1>
-        <p>Comprehensive F&F settlement calculation with tax optimization</p>
+        <p>Comprehensive F&F settlement calculation (Payroll-only deductions on this screen)</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Load employee data
     employee_df = load_employee_data()
-    
     if employee_df.empty:
         st.error("Could not load employee data")
         return
@@ -1625,7 +1626,7 @@ def fnf_settlement_form():
         st.error("❌ Employee not found")
         return
 
-    # EPF column selection
+    # EPF column selection (optional)
     st.caption("💡 If your Employee Master has a specific column for monthly EPF deduction, choose it below.")
     epf_candidates = detect_epf_fixed_columns(employee_df.columns)
     epf_col_choice = st.selectbox(
@@ -1637,15 +1638,13 @@ def fnf_settlement_form():
     if epf_candidates and epf_col_choice != "(Auto-detect)":
         chosen_epf_col = epf_col_choice
 
-    # Enhanced Employee Details Display
+    # Employee details
     st.markdown("""
     <div class="employee-card">
         <h3>👤 Employee Details (Auto-filled)</h3>
     </div>
     """, unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         st.markdown(f"""
         <div class="metric-card">
@@ -1654,7 +1653,6 @@ def fnf_settlement_form():
             <p><strong>Employee Name:</strong> {employee['Employee Name']}</p>
         </div>
         """, unsafe_allow_html=True)
-    
     with col2:
         st.markdown(f"""
         <div class="metric-card">
@@ -1663,7 +1661,6 @@ def fnf_settlement_form():
             <p><strong>Base Location:</strong> {employee['BaseLocation']}</p>
         </div>
         """, unsafe_allow_html=True)
-    
     with col3:
         st.markdown(f"""
         <div class="metric-card">
@@ -1673,17 +1670,16 @@ def fnf_settlement_form():
         </div>
         """, unsafe_allow_html=True)
     
-    # Step 2: Enhanced Tax Regime Selection
+    # Step 2: Tax Regime (kept for context; Tax team is authoritative)
     st.markdown("""
     <div class="employee-card">
         <h3>🏛️ Step 2: Select Tax Regime</h3>
     </div>
     """, unsafe_allow_html=True)
-    
     tax_regime = st.selectbox(
         "Tax Regime", 
         ["Old Tax Regime", "New Tax Regime"],
-        help="Choose between Old Tax Regime (with investment deductions) or New Tax Regime (lower rates, no deductions)"
+        help="Tax team can also change this during review"
     )
     
     # EPF policy for this employee (read from Master)
@@ -1692,7 +1688,6 @@ def fnf_settlement_form():
     # Step 3: Multi-Month Salary Input (default salary from Employee Master)
     employee_monthly_salary = float(employee['Salary']) if 'Salary' in employee and pd.notnull(employee['Salary']) else 0.0
     active_months = enhanced_multi_month_salary_input(employee_monthly_salary=employee_monthly_salary, epf_profile=epf_profile)
-    
     if not active_months:
         st.markdown("""
         <div class="warning-card">
@@ -1701,30 +1696,21 @@ def fnf_settlement_form():
         """, unsafe_allow_html=True)
         return
     
-    # 🔹 Auto EPF (employee share) from F&F months to prefill 80C
+    # 🔹 Auto EPF (employee share) from F&F months (no longer used here, but may be useful for Tax view history)
     epf_auto_total = sum(m['epf'] for m in active_months.values()) if active_months else 0.0
     
-    # Step 4: Investment Options (only for Old Tax Regime)
-    investments_data = {}
-    if tax_regime == "Old Tax Regime":
-        st.markdown("---")
-        investments_data = investment_deductions_input(epf_auto=epf_auto_total)
-    else:
-        st.markdown("""
-        <div class="info-card">
-            📢 <strong>New Tax Regime Selected</strong><br>
-            Investment deductions are not available in the new tax regime
-        </div>
-        """, unsafe_allow_html=True)
+    # Step 4: (Moved) — Tax investments & exempt allowances are handled by Tax Team
+    st.markdown("---")
+    st.info("💡 Tax investments, health & other deductions, and exempt allowances are now handled **only on the Tax Review dashboard** by the Tax Team.")
+    investments_data = {}  # keep empty on Payroll
     
-    # Step 5: Enhanced Other F&F Details
+    # Step 5: Additional F&F Details (Payroll-side deductions remain here)
     st.markdown("""
     <div class="employee-card">
         <h3>📝 Step 5: Additional F&F Details</h3>
     </div>
     """, unsafe_allow_html=True)
 
-    # Form for additional details (no buttons inside)
     with st.form("fnf_additional_details"):
         col1, col2 = st.columns(2)
 
@@ -1734,7 +1720,6 @@ def fnf_settlement_form():
             last_working_day = st.date_input("Last Working Day", value=date.today())
             st.session_state['last_working_day'] = last_working_day  # for working-days calc
 
-            # Enhanced Gratuity auto-calc inputs
             doj_str = str(employee['Date of Joining'])
             try:
                 if len(doj_str.split('/')[2]) == 2:
@@ -1756,7 +1741,6 @@ def fnf_settlement_form():
             st.caption("💡 Gratuity uses > 6 months counted as +1 year; Last Basic = Salary ÷ 3")
             gratuity = st.number_input("🏆 Gratuity (₹)", value=float(auto_gratuity), min_value=0.0)
 
-            # Enhanced Gratuity calculation details
             with st.expander("🏦 Gratuity Calculation Details", expanded=True):
                 raw_gratuity = round((tenure_years * last_basic_da * 15) / 26, 2)
                 capped_gratuity = round(min(raw_gratuity, 20_00_000), 2)
@@ -1802,8 +1786,7 @@ def fnf_settlement_form():
             leave_encashment = st.number_input("🏖️ Leave Encashment (₹)", value=0.0, min_value=0.0)
 
         with col2:
-            st.markdown("### 📉 Additional Deductions")
- 
+            st.markdown("### 📉 Additional Payroll Deductions")
             # PT only for Chennai and Bangalore
             pt_enabled = str(employee['BaseLocation']).lower() in ['chennai', 'bangalore']
             if pt_enabled:
@@ -1827,12 +1810,10 @@ def fnf_settlement_form():
             notice_period_recovery = st.number_input("⏰ Notice Period Recovery (₹)", value=0.0, min_value=0.0)
             other_deductions = st.number_input("📝 Other Deductions (₹)", value=0.0, min_value=0.0)
 
-        # ✅ Submit button MUST be inside this form block
         calculate_clicked = st.form_submit_button("🧮 Calculate F&F Settlement", use_container_width=True)
 
     # Process calculation when form is submitted
     if calculate_clicked:
-        # Store calculation results in session state
         st.session_state.calculation_done = True
         st.session_state.calculation_data = {
             'tax_regime': tax_regime,
@@ -1847,16 +1828,16 @@ def fnf_settlement_form():
             'wfh_recovery': wfh_recovery,
             'notice_period_recovery': notice_period_recovery,
             'other_deductions': other_deductions,
-            'investments_data': investments_data,
+            'investments_data': {},  # payroll no longer collects this
             'tenure_years': tenure_years,
             'last_basic_da': last_basic_da
         }
 
-    # Enhanced calculation results display
+    # Calculation results
     if st.session_state.get('calculation_done', False):
         data = st.session_state.calculation_data
 
-        # ---- Totals from active months (earnings components only) ----
+        # Totals from active months (earnings components only)
         totals = {
             'total_salary': sum(m['total_salary'] for m in active_months.values()),
             'prorated_total': sum(m['prorated_salary'] for m in active_months.values()),
@@ -1867,52 +1848,37 @@ def fnf_settlement_form():
             'total_esi': sum(m['esi'] for m in active_months.values()),
         }
 
-        # ---- Payout view (includes gratuity) ----
+        # Payout view (includes gratuity)
         total_earnings = totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment']
 
-        # ---- Taxable earnings base (gratuity excluded as tax-free u/s 10(10)) ----
+        # Taxable earnings base (gratuity excluded as tax-free u/s 10(10))
         taxable_earnings = totals['prorated_total'] + data['bonus'] + data['leave_encashment']
 
-        # ---- Payroll deductions (do NOT reduce taxable income) ----
-        # EPF / ESI / Advances / Recoveries reduce payout but not total income for tax
+        # Payroll deductions (reduce payout but not taxable income)
         payroll_deductions = (
             totals['total_epf'] + totals['total_esi'] + data['salary_advance'] + data['tada_recovery'] +
             data['wfh_recovery'] + data['notice_period_recovery'] + data['other_deductions']
         )
 
-        # ---- PT is deductible from salary income (u/s 16(iii)) ----
+        # PT is deductible u/s 16(iii)
         pt_deduction = float(data.get('pt_total', 0.0) or 0.0)
 
-        # ---- FY helper ----
+        # FY helper
         fy_start = _fy_start_year_from_session()
 
-        # ---- TAX CALCULATION ----
+        # TAX CALCULATION (Payroll does NOT apply investments or exempt allowances)
         if data['tax_regime'] == "Old Tax Regime":
-            inv = data.get('investments_data', {}) or {}
-            exempt_allowances = float(inv.get('exempt_allowances', 0.0) or 0.0)
-            investments_total = float(inv.get('total_deductions', 0.0) or 0.0)  # 80C/80D/etc.
             std_ded = 50_000.0
-
-            # Total income for slab = taxable_earnings - std_ded - exempt_allowances - investments - PT
-            taxable_income = max(
-                0.0,
-                taxable_earnings - std_ded - exempt_allowances - investments_total - pt_deduction
-            )
+            taxable_income = max(0.0, taxable_earnings - std_ded - pt_deduction)
             tds_amount = tds_old_from_total_income(taxable_income)
-
         else:
-            # New Regime ignores investments & exempt allowances; uses FY-appropriate std. deduction; PT allowed
             std_ded = 75_000.0 if fy_start >= 2025 else 50_000.0
             taxable_income = max(0.0, taxable_earnings - std_ded - pt_deduction)
             tds_amount = tds_new_from_total_income(taxable_income)
 
-        taxable_income = max(0.0, taxable_income)  # clamp
-
-        # ---- Totals including TDS ----
         total_deductions = payroll_deductions + pt_deduction + tds_amount
         net_payable = total_earnings - total_deductions
 
-        # Enhanced results display
         st.markdown("---")
         st.markdown("""
         <div class="main-header">
@@ -1922,11 +1888,12 @@ def fnf_settlement_form():
 
         st.markdown("""
         <div class="info-card">
-            🛈 <strong>Important Note:</strong> Gratuity is tax-free (Section 10(10)) and is excluded from taxable income.
+            🛈 <strong>Important:</strong> Gratuity is tax-free (Sec 10(10)) and excluded from taxable income. 
+            Tax investments & allowances are finalized by the Tax Team.
         </div>
         """, unsafe_allow_html=True)
 
-        # ---- Enhanced Month-wise breakdown ----
+        # Month-wise table
         st.markdown("### 📅 Month-wise Salary Breakdown")
         month_breakdown = []
         for month, m in active_months.items():
@@ -1943,23 +1910,23 @@ def fnf_settlement_form():
         month_df = pd.DataFrame(month_breakdown)
         st.dataframe(month_df, use_container_width=True, hide_index=True)
 
-        # ---- Investment Summary (Old Regime only) ----
-        if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-            with st.expander("💼 Investment & Deduction Details", expanded=False):
-                colx1, colx2, colx3 = st.columns(3)
-                with colx1:
-                    st.markdown("### Section 80C")
-                    create_enhanced_metric_card("Total 80C", f"₹{data['investments_data']['80c_total']:,.0f}", icon="📊")
-                with colx2:
-                    st.markdown("### Other Deductions")
-                    create_enhanced_metric_card("Section 80D", f"₹{data['investments_data']['80d_total']:,.0f}", icon="🏥")
-                    create_enhanced_metric_card("Other", f"₹{data['investments_data']['other_deductions']:,.0f}", icon="📋")
-                with colx3:
-                    st.markdown("### Exempt Allowances")
-                    create_enhanced_metric_card("Total Exempt", f"₹{data['investments_data']['exempt_allowances']:,.0f}", icon="🚗")
-                    create_enhanced_metric_card("Tax Savings", f"₹{data['investments_data']['total_deductions']:,.0f}", icon="💰")
+        # ✨ Payroll-only Deduction Summary cards
+        st.markdown("### 🧾 Deduction Summary (Payroll)")
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        with dc1:
+            create_enhanced_metric_card("EPF (total)", f"₹{totals['total_epf']:,.2f}", icon="🏦")
+        with dc2:
+            create_enhanced_metric_card("ESI (total)", f"₹{totals['total_esi']:,.2f}", icon="🏥")
+        with dc3:
+            combo = data['wfh_recovery'] + data['tada_recovery'] + data['notice_period_recovery']
+            create_enhanced_metric_card("WFH+TADA+Notice", f"₹{combo:,.2f}", icon="🧾")
+        with dc4:
+            combo2 = data['salary_advance'] + data['other_deductions']
+            create_enhanced_metric_card("Advance+Other", f"₹{combo2:,.2f}", icon="💳")
 
-        # ---- Enhanced Overall Summary ----
+        # Old-regime investment details no longer shown on Payroll
+
+        # Overall Summary
         st.markdown("### 💰 Overall F&F Summary")
         colo1, colo2, colo3 = st.columns(3)
 
@@ -1969,14 +1936,12 @@ def fnf_settlement_form():
                 <h3>✅ EARNINGS</h3>
             </div>
             """, unsafe_allow_html=True)
-            
             create_enhanced_metric_card("Basic Salary", f"₹{totals['prorated_basic']:,.2f}", icon="💰")
             create_enhanced_metric_card("HRA", f"₹{totals['prorated_hra']:,.2f}", icon="🏠")
             create_enhanced_metric_card("Special Allowances", f"₹{totals['prorated_special']:,.2f}", icon="📋")
             create_enhanced_metric_card("Gratuity", f"₹{data['gratuity']:,.2f}", icon="🏆")
             create_enhanced_metric_card("Bonus", f"₹{data['bonus']:,.2f}", icon="🎁")
             create_enhanced_metric_card("Leave Encashment", f"₹{data['leave_encashment']:,.2f}", icon="🏖️")
-            
             st.markdown("---")
             create_enhanced_metric_card("Total Earnings", f"₹{total_earnings:,.2f}", icon="💵")
 
@@ -1986,7 +1951,6 @@ def fnf_settlement_form():
                 <h3>📉 DEDUCTIONS</h3>
             </div>
             """, unsafe_allow_html=True)
-            
             create_enhanced_metric_card("Total EPF", f"₹{totals['total_epf']:,.2f}", icon="🏦")
             create_enhanced_metric_card("Total ESI", f"₹{totals['total_esi']:,.2f}", icon="🏥")
             create_enhanced_metric_card("PT", f"₹{pt_deduction:,.2f}", icon="🏛️")
@@ -1996,7 +1960,6 @@ def fnf_settlement_form():
             create_enhanced_metric_card("Notice Period", f"₹{data['notice_period_recovery']:,.2f}", icon="⏰")
             create_enhanced_metric_card("Other", f"₹{data['other_deductions']:,.2f}", icon="📝")
             create_enhanced_metric_card(f"TDS ({data['tax_regime'].split()[0]})", f"₹{tds_amount:,.2f}", icon="🏛️")
-            
             st.markdown("---")
             create_enhanced_metric_card("Total Deductions", f"₹{total_deductions:,.2f}", icon="📉")
 
@@ -2006,19 +1969,13 @@ def fnf_settlement_form():
                 <h3>💼 NET SETTLEMENT</h3>
             </div>
             """, unsafe_allow_html=True)
-            
             if net_payable >= 0:
                 create_enhanced_metric_card("Net Payable", f"₹{net_payable:,.2f}", delta="✅ Credit", icon="💰")
             else:
                 create_enhanced_metric_card("Net Recoverable", f"₹{abs(net_payable):,.2f}", delta="❌ Debit", icon="💸")
-
             create_enhanced_metric_card("Tax Regime", data['tax_regime'], icon="🏛️")
-            
-            if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-                tax_saved = (data['investments_data']['total_deductions'] * 0.30)  # rough indicator
-                create_enhanced_metric_card("Est. Tax Saved", f"₹{tax_saved:,.0f}", icon="💡")
 
-        # ---- Persist submission ----
+        # Save submission
         fnf_data = {
             'employee_id': int(employee['Employee ID']),
             'employee_name': employee['Employee Name'],
@@ -2030,7 +1987,7 @@ def fnf_settlement_form():
             'tax_regime': data['tax_regime'],
             'active_months': active_months,
             'salary_totals': totals,
-            'investments_data': data['investments_data'],
+            'investments_data': {},  # empty on Payroll
             'gratuity': data['gratuity'],
             'bonus': data['bonus'],
             'leave_encashment': data['leave_encashment'],
@@ -2064,34 +2021,31 @@ def fnf_settlement_form():
         else:
             st.session_state.fnf_submissions.append(fnf_data)
 
-        # Enhanced Actions
+        # Next steps
         st.markdown("---")
         st.markdown("### 🎯 Next Steps")
         c1, c2, c3 = st.columns(3)
-
         with c1:
             if st.button("📤 Send to Tax Team", use_container_width=True):
                 fnf_data['status'] = 'Under Tax Review'
                 st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
                 save_fnf_data()
-                st.success("✅ F&F settlement sent to Tax Team for review!")
+                st.success("✅ Sent to Tax Team for review!")
                 st.balloons()
                 st.session_state.calculation_done = False
                 st.rerun()
-
         with c2:
             if st.button("💾 Save Draft", use_container_width=True):
                 fnf_data['status'] = 'Draft'
                 st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
                 save_fnf_data()
-                st.info("💾 F&F settlement saved as draft")
+                st.info("💾 Draft saved")
                 st.session_state.calculation_done = False
                 st.rerun()
-
         with c3:
             if st.button("📄 Detailed Report", use_container_width=True):
-                st.info("📄 Comprehensive F&F report with all breakdowns generated!")
-
+                st.info("📄 Comprehensive F&F report generated!")
+                
 # File constants
 FNF_FILE        = "fnf_submissions.json"     # (you already have these)
 FNF_CLOSED_FILE = "fnf_closed.json"
@@ -2113,8 +2067,7 @@ def save_fnf_closed_data(data):
         st.warning(f"Could not save closed F&F data: {e}")
 
 def tax_review_dashboard():
-    """Enhanced Tax Review Dashboard"""
-    
+    """Tax Review Dashboard — regime selection + editable tax inputs + summary"""
     st.markdown("""
     <div class="main-header">
         <h1>🔍 Tax Review Dashboard</h1>
@@ -2122,14 +2075,13 @@ def tax_review_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Debug information (collapsible)
+    # Debug toggle
     if st.checkbox("🔧 Debug Info"):
         st.markdown("""
         <div class="calculation-box">
             <h4>Session State Debug</h4>
         </div>
         """, unsafe_allow_html=True)
-        
         if 'fnf_submissions' in st.session_state:
             st.write(f"Total submissions: {len(st.session_state.fnf_submissions)}")
             for i, sub in enumerate(st.session_state.fnf_submissions):
@@ -2141,7 +2093,6 @@ def tax_review_dashboard():
         st.markdown("""
         <div class="info-card">
             <h3>📭 No F&F submissions for review</h3>
-            <h4>How to test:</h4>
             <ol>
                 <li>Login as Payroll Team</li>
                 <li>Submit an F&F calculation</li>
@@ -2152,19 +2103,16 @@ def tax_review_dashboard():
         """, unsafe_allow_html=True)
         return
     
-    # Filter submissions for tax review - including all relevant statuses
     review_submissions = [
         s for s in st.session_state.fnf_submissions 
         if s['status'] in ['Under Tax Review', 'Tax Approved', 'Pending Tax Review', 'Tax Rejected']
     ]
-    
     if not review_submissions:
         st.markdown("""
         <div class="warning-card">
             📋 No F&F submissions pending tax review
         </div>
         """, unsafe_allow_html=True)
-        
         st.markdown("### Current submissions:")
         for sub in st.session_state.fnf_submissions:
             status_badge = create_status_badge(sub['status'])
@@ -2177,7 +2125,6 @@ def tax_review_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Show submissions with enhanced styling
     for i, submission in enumerate(review_submissions):
         status_emoji = {
             'Under Tax Review': '🟠',
@@ -2185,14 +2132,11 @@ def tax_review_dashboard():
             'Tax Approved': '🟢',
             'Tax Rejected': '🔴'
         }.get(submission['status'], '⚪')
-        
         status_badge = create_status_badge(submission['status'])
         
         with st.expander(f"{status_emoji} {submission['employee_name']} (ID: {submission['employee_id']}) - {submission['status']}", expanded=True):
-            
-            # Enhanced Employee & Financial Summary
+            # Summaries
             col1, col2 = st.columns(2)
-            
             with col1:
                 st.markdown(f"""
                 <div class="employee-card">
@@ -2205,16 +2149,14 @@ def tax_review_dashboard():
                     <p><strong>Last Working Day:</strong> {submission['last_working_day']}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 st.markdown(f"""
                 <div class="employee-card">
                     <h4>🏛️ Tax Information</h4>
-                    <p><strong>Tax Regime:</strong> {submission['tax_regime']}</p>
-                    <p><strong>Taxable Income:</strong> ₹{submission.get('taxable_income', 0):,.2f}</p>
-                    <p><strong>Current TDS:</strong> ₹{submission['tds_amount']:,.2f}</p>
+                    <p><strong>Tax Regime (current):</strong> {submission['tax_regime']}</p>
+                    <p><strong>Taxable Income (prev):</strong> ₹{submission.get('taxable_income', 0):,.2f}</p>
+                    <p><strong>TDS (prev):</strong> ₹{submission['tds_amount']:,.2f}</p>
                 </div>
                 """, unsafe_allow_html=True)
-            
             with col2:
                 st.markdown(f"""
                 <div class="employee-card">
@@ -2224,7 +2166,6 @@ def tax_review_dashboard():
                     <p><strong>Net Payable:</strong> ₹{submission['net_payable']:,.2f}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 if 'salary_totals' in submission:
                     st.markdown(f"""
                     <div class="employee-card">
@@ -2236,8 +2177,8 @@ def tax_review_dashboard():
                         <p><strong>Total ESI:</strong> ₹{submission['salary_totals'].get('total_esi', 0):,.2f}</p>
                     </div>
                     """, unsafe_allow_html=True)
-            
-            # Enhanced Tax Review Form
+
+            # Review + editable tax inputs
             st.markdown("---")
             st.markdown("""
             <div class="employee-card">
@@ -2246,82 +2187,86 @@ def tax_review_dashboard():
             """, unsafe_allow_html=True)
             
             with st.form(f"tax_review_form_{i}", clear_on_submit=False):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("### 📊 Current Tax Details")
-                    
+                colA, colB = st.columns(2)
+                with colA:
                     create_enhanced_metric_card("Current TDS", f"₹{submission['tds_amount']:,.2f}", icon="💰")
-                    create_enhanced_metric_card("Tax Regime", submission['tax_regime'], icon="🏛️")
-                    
-                    # TDS adjustment
+                    create_enhanced_metric_card("Tax Regime (prev)", submission['tax_regime'], icon="🏛️")
                     new_tds = st.number_input(
                         "Revised TDS Amount (₹)", 
-                        value=submission['tds_amount'], 
+                        value=float(submission['tds_amount']), 
                         min_value=0.0,
                         key=f"revised_tds_{i}",
                         step=100.0
                     )
-                    
-                    # Additional deductions
                     additional_deductions = st.number_input(
-                        "Additional Tax Deductions (₹)", 
-                        value=submission.get('additional_deductions', 0.0), 
+                        "Additional Non-tax Deductions (₹)", 
+                        value=float(submission.get('additional_deductions', 0.0) or 0.0), 
                         min_value=0.0,
                         key=f"additional_deductions_{i}",
-                        step=100.0
+                        step=100.0,
+                        help="If any extra deduction to apply directly to net (rare)."
                     )
-                
-                with col2:
-                    st.markdown("### ⚙️ Review Options")
-                    
-                    # Tax regime change
+                with colB:
                     new_tax_regime = st.selectbox(
                         "Tax Regime",
                         ["Old Tax Regime", "New Tax Regime"],
                         index=0 if submission['tax_regime'] == "Old Tax Regime" else 1,
                         key=f"new_regime_{i}"
                     )
-                    
-                    # Review decision
                     review_decision = st.selectbox(
                         "Review Decision",
                         ["Approve", "Send Back for Revision"],
                         key=f"review_decision_{i}"
                     )
-                    
-                    # Comments
                     tax_comments = st.text_area(
                         "Tax Review Comments", 
                         value=submission.get('tax_comments', ''),
                         key=f"tax_comments_{i}",
                         height=100,
-                        help="Add your review comments, feedback, or reasons for changes"
+                        help="Add review comments or reasons for changes"
                     )
                 
-                # Calculate revised amounts
-                revised_total_deductions = (
-                    submission['total_deductions'] - submission['tds_amount'] + 
-                    new_tds + additional_deductions
-                )
-                revised_net_payable = submission['total_earnings'] - revised_total_deductions
-                
-                # Enhanced calculation preview
-                st.markdown("### 🧮 Revised Calculation Preview")
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    create_enhanced_metric_card("Original TDS", f"₹{submission['tds_amount']:,.0f}", icon="💰")
-                with col2:
-                    delta_tds = new_tds - submission['tds_amount']
-                    create_enhanced_metric_card("Revised TDS", f"₹{new_tds:,.0f}", 
-                                                 delta=f"{delta_tds:+,.0f}", icon="🔄")
-                with col3:
-                    create_enhanced_metric_card("Additional Deductions", f"₹{additional_deductions:,.0f}", icon="➕")
-                with col4:
-                    delta_net = revised_net_payable - submission['net_payable']
-                    create_enhanced_metric_card("Revised Net Payable", f"₹{revised_net_payable:,.0f}",
-                                                 delta=f"{delta_net:+,.0f}", icon="💼")
+                # ---------- Editable Tax Inputs ----------
+                st.markdown("---")
+                st.markdown("### 🧮 Tax Inputs (Editable by Tax Team)")
+                prev = submission.get("investments_data", {}) or {}
+                bd = prev.get("breakdown", {}) or {}
+                def v(key, default=0.0):
+                    try: return float(bd.get(key, default) or 0.0)
+                    except: return default
+
+                # 80C
+                s80c1, s80c2, s80c3, s80c4 = st.columns(4)
+                ppf            = s80c1.number_input("PPF", min_value=0.0, step=500.0, value=v("ppf"))
+                epf_employee   = s80c2.number_input("EPF (Employee)", min_value=0.0, step=100.0, value=v("epf_employee"))
+                elss           = s80c3.number_input("ELSS", min_value=0.0, step=500.0, value=v("elss"))
+                life_ins       = s80c4.number_input("Life Insurance", min_value=0.0, step=500.0, value=v("life_insurance"))
+                s80c5, s80c6, s80c7, s80c8 = st.columns(4)
+                fd_5year       = s80c5.number_input("5Y FD", min_value=0.0, step=500.0, value=v("fd_5year"))
+                nsc            = s80c6.number_input("NSC", min_value=0.0, step=500.0, value=v("nsc"))
+                sukanya        = s80c7.number_input("Sukanya", min_value=0.0, step=500.0, value=v("suknya_samriddhi"))
+                tuition        = s80c8.number_input("Tuition Fees", min_value=0.0, step=500.0, value=v("tuition_fees"))
+                total_80c_raw  = ppf + epf_employee + elss + life_ins + fd_5year + nsc + sukanya + tuition
+                eligible_80c   = min(total_80c_raw, 150000.0)
+
+                # Health & Other
+                h1, h2, h3, h4 = st.columns(4)
+                health_self    = h1.number_input("80D Self+Family", min_value=0.0, step=500.0, value=v("health_insurance_self"))
+                health_parents = h2.number_input("80D Parents",     min_value=0.0, step=500.0, value=v("health_insurance_parents"))
+                sec80dd        = h3.number_input("80DD",            min_value=0.0, step=500.0, value=v("section_80dd"))
+                sec80ddb       = h4.number_input("80DDB",           min_value=0.0, step=500.0, value=v("section_80ddb"))
+                h5, h6, h7, h8 = st.columns(4)
+                home_loan      = h5.number_input("Home Loan Int.",  min_value=0.0, step=1000.0, value=v("home_loan_interest"))
+                edu_loan       = h6.number_input("Education Loan",  min_value=0.0, step=1000.0, value=v("education_loan_interest"))
+                nps_1b         = h7.number_input("NPS 80CCD(1B)",   min_value=0.0, step=500.0,  value=v("nps_80ccd_1b"))
+                nps_2          = h8.number_input("NPS 80CCD(2)",    min_value=0.0, step=500.0,  value=v("nps_80ccd_2"))
+                total_80d      = health_self + health_parents
+                other_deds     = sec80dd + sec80ddb + home_loan + edu_loan + nps_1b + nps_2
+
+                # Exempt Allowances (show under New, editable)
+                a1, a2, a3, a4, a5 = st.columns(5)
+               
+
                 
                 # Submit review
                 submit_review = st.form_submit_button("📋 Submit Tax Review", use_container_width=True)
