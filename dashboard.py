@@ -1,18 +1,3 @@
- icon="🏥")
-                with s3: create_enhanced_metric_card("Other Deductions",f"₹{other_deds:,.0f}",   icon="📋")
-                with s4: create_enhanced_metric_card("Exempt Allowances",f"₹{exempt_allowances:,.0f}", icon="🚗")
-
-                # ---------- Auto tax recompute preview (overridable) ----------
-                # We need FY for New Regime std. deduction. Reuse helper by setting session LWD.
-                try:
-                    st.session_state['last_working_day'] = datetime.strptime(submission['last_working_day'], '%d/%m/%Y').date()
-                except Exception:
-                    pass
-ChatGPT said:
-Thought for 45s
-
-here’s the complete script, all in one piece:
-
 import streamlit as st
 import pandas as pd
 import os
