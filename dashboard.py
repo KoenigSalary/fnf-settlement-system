@@ -2111,8 +2111,107 @@ def save_fnf_closed_data(data):
             json.dump(data, f, indent=2, default=str)
     except Exception as e:
         st.warning(f"Could not save closed F&F data: {e}")
+        
+def recompute_tax(submission: dict, inv: dict, new_regime: str):
+    """
+    Recompute taxable income, TDS and settlement totals from a tax-team edit.
+    Relies on: _fy_start_year_from_session, tds_old_from_total_income, tds_new_from_total_income.
+    """
+    def _f(x, default=0.0):
+        try: return float(x if x is not None else default)
+        except Exception: return float(default)
+    def _sum(d: dict, keys: list[str]) -> float:
+        return sum(_f(d.get(k, 0.0)) for k in keys)
+
+    # Earnings used for slab (gratuity excluded)
+    taxable_earnings = (
+        _f(submission.get('salary_totals', {}).get('prorated_total', 0.0))
+        + _f(submission.get('bonus', 0.0))
+        + _f(submission.get('leave_encashment', 0.0))
+    )
+    pt_deduction = _f(submission.get('pt_total', 0.0))
+
+    # Normalize investments
+    br = (inv or {}).get('breakdown', {})
+    c80c_keys = ['ppf','epf_employee','elss','life_insurance','fd_5year','nsc','suknya_samriddhi','tuition_fees']
+    inv_80c_uncapped = _sum(br, c80c_keys)
+    inv_80c = min(inv_80c_uncapped, 150000.0)
+
+    inv_80d = _sum(br, ['health_insurance_self','health_insurance_parents'])
+    inv_other = _sum(br, ['section_80dd','section_80ddb','home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2'])
+    exempt_allowances = _sum(br, ['conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'])
+    inv_total_for_old = inv_80c + inv_80d + inv_other
+
+    # Standard deduction (FY-aware for New regime)
+    fy_start = _fy_start_year_from_session()
+    std_deduction = 75_000.0 if (new_regime == "New Tax Regime" and fy_start >= 2025) else 50_000.0
+
+    # Taxable income & TDS by regime
+    if new_regime == "Old Tax Regime":
+        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction - inv_total_for_old - exempt_allowances)
+        tds_amount = tds_old_from_total_income(taxable_income)
+    else:
+        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction)
+        tds_amount = tds_new_from_total_income(taxable_income)
+
+    # Payroll-side deductions (do not affect taxable income)
+    payroll_deductions = (
+        _f(submission.get('salary_totals', {}).get('total_epf', 0.0))
+        + _f(submission.get('salary_totals', {}).get('total_esi', 0.0))
+        + _f(submission.get('salary_advance', 0.0))
+        + _f(submission.get('tada_recovery', 0.0))
+        + _f(submission.get('wfh_recovery', 0.0))
+        + _f(submission.get('notice_period_recovery', 0.0))
+        + _f(submission.get('other_deductions', 0.0))
+    )
+
+    # Totals & net
+    total_earnings = _f(submission.get('total_earnings', 0.0))
+    if total_earnings == 0.0:
+        total_earnings = (
+            _f(submission.get('salary_totals', {}).get('prorated_total', 0.0))
+            + _f(submission.get('gratuity', 0.0))
+            + _f(submission.get('bonus', 0.0))
+            + _f(submission.get('leave_encashment', 0.0))
+        )
+
+    total_deductions = payroll_deductions + pt_deduction + tds_amount
+    net_payable = total_earnings - total_deductions
+
+    investments_data = {
+        '80c_total': round(inv_80c, 2),
+        '80d_total': round(inv_80d, 2),
+        'other_deductions': round(inv_other, 2),
+        'exempt_allowances': round(exempt_allowances, 2),
+        'total_deductions': round(inv_total_for_old, 2),  # old-regime use
+        'breakdown': {k: _f(br.get(k, 0.0)) for k in set(c80c_keys + [
+            'health_insurance_self','health_insurance_parents','section_80dd','section_80ddb',
+            'home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2',
+            'conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'
+        ])}
+    }
+
+    return {
+        'regime': new_regime,
+        'taxable_earnings': round(taxable_earnings, 2),
+        'std_deduction': round(std_deduction, 2),
+        'pt_deduction': round(pt_deduction, 2),
+        'inv_80c': round(inv_80c, 2),
+        'inv_80d': round(inv_80d, 2),
+        'inv_other': round(inv_other, 2),
+        'exempt_allowances': round(exempt_allowances, 2),
+        'inv_total_for_old': round(inv_total_for_old, 2),
+        'taxable_income': round(taxable_income, 2),
+        'tds_amount': round(tds_amount, 2),
+        'payroll_deductions': round(payroll_deductions, 2),
+        'total_deductions': round(total_deductions, 2),
+        'total_earnings': round(total_earnings, 2),
+        'net_payable': round(net_payable, 2),
+        'investments_data': investments_data,
+    }
+    
 def tax_review_dashboard():
-    """Enhanced Tax Review Dashboard with full Investments editor + live recompute"""
+    """Tax Review: regime selection, full investments editor, live preview, and a form submit button."""
     st.markdown("""
     <div class="main-header">
         <h1>🔍 Tax Review Dashboard</h1>
@@ -2121,206 +2220,164 @@ def tax_review_dashboard():
     """, unsafe_allow_html=True)
 
     if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
-        st.markdown("""
-        <div class="info-card">
-            <h3>📭 No F&F submissions for review</h3>
-            <ol>
-                <li>Payroll submits F&F calculation</li>
-                <li>Click 'Send to Tax Team'</li>
-                <li>Open this dashboard</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("No F&F submissions for review yet.")
         return
 
-    # Include items that are relevant for tax to review/approve/reject
     review_submissions = [
         s for s in st.session_state.fnf_submissions
         if s['status'] in ['Under Tax Review', 'Pending Tax Review', 'Tax Approved', 'Tax Rejected']
     ]
     if not review_submissions:
-        st.markdown("""
-        <div class="warning-card">📋 No F&F submissions pending tax review</div>
-        """, unsafe_allow_html=True)
+        st.info("Nothing pending for tax review.")
         return
 
-    st.markdown(f"""
-    <div class="success-card">📋 Found {len(review_submissions)} submissions for tax review</div>
-    """, unsafe_allow_html=True)
-
-    # Investment input keys
-    C80C_KEYS = ['ppf', 'epf_employee', 'elss', 'life_insurance', 'fd_5year', 'nsc', 'suknya_samriddhi', 'tuition_fees']
-    HEALTH_KEYS = ['health_insurance_self', 'health_insurance_parents']
-    OTHER_KEYS = ['section_80dd', 'section_80ddb', 'home_loan_interest', 'education_loan_interest', 'nps_80ccd_1b', 'nps_80ccd_2']
-    EXEMPT_KEYS = ['conveyance_allowance', 'helper_allowance', 'lta', 'tel_broadband', 'ld_allowance', 'hra_exemption']
+    # Keys helper to avoid collisions across expanders
+    def k(base, idx): return f"{base}_{idx}"
 
     for i, submission in enumerate(review_submissions):
-        status_emoji = {
-            'Under Tax Review': '🟠', 'Pending Tax Review': '🟡',
-            'Tax Approved': '🟢', 'Tax Rejected': '🔴'
-        }.get(submission['status'], '⚪')
-
-        with st.expander(f"{status_emoji} {submission['employee_name']} (ID: {submission['employee_id']}) – {submission['status']}", expanded=True):
-            # Header cards
+        with st.expander(f"{submission['employee_name']} (ID: {submission['employee_id']}) – {submission['status']}", expanded=True):
+            # Header metrics
             c1, c2, c3 = st.columns(3)
-            with c1:
-                create_enhanced_metric_card("Taxable Income", f"₹{submission.get('taxable_income', 0):,.0f}", icon="📄")
-            with c2:
-                create_enhanced_metric_card("Current TDS", f"₹{submission.get('tds_amount', 0):,.0f}", icon="🏛️")
-            with c3:
-                create_enhanced_metric_card("Net Payable", f"₹{submission.get('net_payable', 0):,.0f}", icon="💼")
+            with c1: create_enhanced_metric_card("Taxable Income", f"₹{submission.get('taxable_income', 0):,.0f}", icon="📄")
+            with c2: create_enhanced_metric_card("Current TDS", f"₹{submission.get('tds_amount', 0):,.0f}", icon="🏛️")
+            with c3: create_enhanced_metric_card("Net Payable", f"₹{submission.get('net_payable', 0):,.0f}", icon="💼")
 
-            # Existing regime & investments
             inv_saved = submission.get('investments_data', {}) or {}
             breakdown_saved = inv_saved.get('breakdown', {})
 
-            st.markdown("---")
-            st.markdown("### 🏛️ Regime & Investment Inputs (Editable by Tax Team)")
-            with st.form(f"tax_edit_form_{i}", clear_on_submit=False):
-                # Regime selection (editable)
-                new_tax_regime = st.selectbox(
-                    "Tax Regime",
-                    ["Old Tax Regime", "New Tax Regime"],
-                    index=0 if submission.get('tax_regime') == "Old Tax Regime" else 1,
-                    key=f"regime_{i}"
-                )
+            st.markdown("### 🏛️ Regime & Investment Inputs (live)")
+            # Regime (outside form → live recompute)
+            new_tax_regime = st.selectbox(
+                "Tax Regime",
+                ["Old Tax Regime", "New Tax Regime"],
+                index=0 if submission.get('tax_regime') == "Old Tax Regime" else 1,
+                key=k("regime", i)
+            )
 
-                st.markdown("#### 📊 Section 80C (Max ₹1,50,000)")
-                c80c1, c80c2 = st.columns(2)
-                with c80c1:
-                    ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=float(breakdown_saved.get('ppf', 0.0)), key=f"ppf_{i}")
-                    epf_emp_default = breakdown_saved.get('epf_employee')
-                    if epf_emp_default is None:
-                        # Auto-suggest EPF from payroll totals (employee share)
-                        epf_emp_default = float(submission.get('salary_totals', {}).get('total_epf', 0.0))
-                    epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=float(epf_emp_default), key=f"epfemp_{i}")
-                    elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=float(breakdown_saved.get('elss', 0.0)), key=f"elss_{i}")
-                    life_insurance = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=float(breakdown_saved.get('life_insurance', 0.0)), key=f"life_{i}")
-                with c80c2:
-                    fd_5y = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=float(breakdown_saved.get('fd_5year', 0.0)), key=f"fd5_{i}")
-                    nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=float(breakdown_saved.get('nsc', 0.0)), key=f"nsc_{i}")
-                    suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=float(breakdown_saved.get('suknya_samriddhi', 0.0)), key=f"suk_{i}")
-                    tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=float(breakdown_saved.get('tuition_fees', 0.0)), key=f"tuition_{i}")
+            # 80C
+            st.markdown("#### 📊 Section 80C (Max ₹1,50,000)")
+            c80c1, c80c2 = st.columns(2)
+            with c80c1:
+                ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=float(breakdown_saved.get('ppf', 0.0)), key=k("ppf", i))
+                epf_default = breakdown_saved.get('epf_employee')
+                if epf_default is None:
+                    epf_default = float(submission.get('salary_totals', {}).get('total_epf', 0.0))
+                epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=float(epf_default), key=k("epfemp", i))
+                elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=float(breakdown_saved.get('elss', 0.0)), key=k("elss", i))
+                life = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=float(breakdown_saved.get('life_insurance', 0.0)), key=k("life", i))
+            with c80c2:
+                fd5 = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=float(breakdown_saved.get('fd_5year', 0.0)), key=k("fd5", i))
+                nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=float(breakdown_saved.get('nsc', 0.0)), key=k("nsc", i))
+                suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=float(breakdown_saved.get('suknya_samriddhi', 0.0)), key=k("suk", i))
+                tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=float(breakdown_saved.get('tuition_fees', 0.0)), key=k("tuition", i))
 
-                # 80D & Others
-                st.markdown("#### 🏥 Health & Other Deductions")
-                d1, d2 = st.columns(2)
-                with d1:
-                    hi_self = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_self', 0.0)), key=f"hi_self_{i}")
-                    hi_par = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_parents', 0.0)), key=f"hi_par_{i}")
-                    sec_80dd = st.number_input("♿ 80DD", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80dd', 0.0)), key=f"dd_{i}")
-                    sec_80ddb = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80ddb', 0.0)), key=f"ddb_{i}")
-                with d2:
-                    hli = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=float(breakdown_saved.get('home_loan_interest', 0.0)), key=f"hli_{i}")
-                    eli = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=float(breakdown_saved.get('education_loan_interest', 0.0)), key=f"eli_{i}")
-                    nps_1b = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_1b', 0.0)), key=f"nps1b_{i}")
-                    nps_2 = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=f"nps2_{i}")
+            # 80D & Others
+            st.markdown("#### 🏥 Health & Other Deductions")
+            d1, d2 = st.columns(2)
+            with d1:
+                hi_self  = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_self', 0.0)), key=k("hi_self", i))
+                hi_par   = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_parents', 0.0)), key=k("hi_par", i))
+                sec_dd   = st.number_input("♿ 80DD", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80dd', 0.0)), key=k("80dd", i))
+                sec_ddb  = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80ddb', 0.0)), key=k("80ddb", i))
+            with d2:
+                hli      = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=float(breakdown_saved.get('home_loan_interest', 0.0)), key=k("hli", i))
+                eli      = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=float(breakdown_saved.get('education_loan_interest', 0.0)), key=k("eli", i))
+                nps1b    = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_1b', 0.0)), key=k("nps1b", i))
+                nps2     = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
 
-                # Exempt allowances (show even for New regime; only applied under Old)
-                st.markdown("#### 🚗 Exempt Allowances (Old Regime computation only)")
-                a1, a2 = st.columns(2)
-                with a1:
-                    conv = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=float(breakdown_saved.get('conveyance_allowance', 0.0)), key=f"conv_{i}")
-                    helpa = st.number_input("🏠 Helper", 0.0, step=500.0, value=float(breakdown_saved.get('helper_allowance', 0.0)), key=f"helpa_{i}")
-                    lta = st.number_input("✈️ LTA", 0.0, step=5000.0, value=float(breakdown_saved.get('lta', 0.0)), key=f"lta_{i}")
-                with a2:
-                    tel = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=float(breakdown_saved.get('tel_broadband', 0.0)), key=f"tel_{i}")
-                    ld = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=f"ld_{i}")
-                    hra_ex = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=f"hraex_{i}")
+            # Exempt allowances (shown for both regimes; applied in Old)
+            st.markdown("#### 🚗 Exempt Allowances")
+            a1, a2 = st.columns(2)
+            with a1:
+                conv    = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=float(breakdown_saved.get('conveyance_allowance', 0.0)), key=k("conv", i))
+                helper  = st.number_input("🏠 Helper", 0.0, step=500.0, value=float(breakdown_saved.get('helper_allowance', 0.0)), key=k("helper", i))
+                lta     = st.number_input("✈️ LTA", 0.0, step=5000.0, value=float(breakdown_saved.get('lta', 0.0)), key=k("lta", i))
+            with a2:
+                tel     = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=float(breakdown_saved.get('tel_broadband', 0.0)), key=k("tel", i))
+                ld      = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=k("ld", i))
+                hra_ex  = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=k("hraex", i))
 
-                # Build investments dict + live summary
-                inv_dict = {
-                    'breakdown': {
-                        'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life_insurance,
-                        'fd_5year': fd_5y, 'nsc': nsc, 'suknya_samriddhi': suk, 'tuition_fees': tuition,
-                        'health_insurance_self': hi_self, 'health_insurance_parents': hi_par,
-                        'section_80dd': sec_80dd, 'section_80ddb': sec_80ddb,
-                        'home_loan_interest': hli, 'education_loan_interest': eli,
-                        'nps_80ccd_1b': nps_1b, 'nps_80ccd_2': nps_2,
-                        'conveyance_allowance': conv, 'helper_allowance': helpa, 'lta': lta,
-                        'tel_broadband': tel, 'ld_allowance': ld, 'hra_exemption': hra_ex
-                    }
+            # PT editable by tax team
+            pt_edit = st.number_input("🏛️ PT (u/s 16(iii))", 0.0, step=100.0,
+                                      value=float(submission.get('pt_total', 0.0)), key=k("pt", i))
+
+            # Build investments dict for preview
+            inv_dict = {
+                'breakdown': {
+                    'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life,
+                    'fd_5year': fd5, 'nsc': nsc, 'suknya_samriddhi': suk, 'tuition_fees': tuition,
+                    'health_insurance_self': hi_self, 'health_insurance_parents': hi_par,
+                    'section_80dd': sec_dd, 'section_80ddb': sec_ddb,
+                    'home_loan_interest': hli, 'education_loan_interest': eli,
+                    'nps_80ccd_1b': nps1b, 'nps_80ccd_2': nps2,
+                    'conveyance_allowance': conv, 'helper_allowance': helper, 'lta': lta,
+                    'tel_broadband': tel, 'ld_allowance': ld, 'hra_exemption': hra_ex
                 }
-                # Optional: allow PT tweak by tax team
-                pt_edit = st.number_input("🏛️ PT (allowed u/s 16(iii))", 0.0, step=100.0,
-                                          value=float(submission.get('pt_total', 0.0)), key=f"pt_{i}")
+            }
 
-                # Live recompute (auto)
-                # Temporarily clone submission with PT possibly edited for preview
-                sub_for_preview = dict(submission)
-                sub_for_preview['pt_total'] = pt_edit
+            # Live preview: clone submission with PT tweak
+            sub_preview = dict(submission)
+            sub_preview['pt_total'] = pt_edit
+            preview = recompute_tax(sub_preview, inv_dict, new_tax_regime)
 
-                preview = recompute_tax(sub_for_preview, inv_dict, new_tax_regime)
+            # Summary cards (live)
+            st.markdown("### 📋 Investment & Deduction Summary")
+            s1, s2, s3, s4 = st.columns(4)
+            with s1: create_enhanced_metric_card("80C (cap ₹1.5L)", f"₹{preview['inv_80c']:,.0f}", icon="📊")
+            with s2: create_enhanced_metric_card("80D", f"₹{preview['inv_80d']:,.0f}", icon="🏥")
+            with s3: create_enhanced_metric_card("Other Deductions", f"₹{preview['inv_other']:,.0f}", icon="📋")
+            with s4: create_enhanced_metric_card("Exempt Allowances", f"₹{preview['exempt_allowances']:,.0f}", icon="🚗")
 
-                # Show live “Investment & Deduction Summary”
-                st.markdown("### 📋 Investment & Deduction Summary")
-                s1, s2, s3, s4 = st.columns(4)
-                with s1:
-                    create_enhanced_metric_card("80C (cap ₹1.5L)", f"₹{preview['inv_80c']:,.0f}", icon="📊")
-                with s2:
-                    create_enhanced_metric_card("80D", f"₹{preview['inv_80d']:,.0f}", icon="🏥")
-                with s3:
-                    create_enhanced_metric_card("Other Deductions", f"₹{preview['inv_other']:,.0f}", icon="📋")
-                with s4:
-                    create_enhanced_metric_card("Exempt Allowances", f"₹{preview['exempt_allowances']:,.0f}", icon="🚗")
+            # TDS override & additional tax deductions (live)
+            tds_auto = float(preview['tds_amount'])
+            new_tds = st.number_input("Revised TDS (manual override)", 0.0, step=500.0, value=tds_auto, key=k("tds", i))
+            addl_tax_ded = st.number_input("Additional Tax Deductions (if any)", 0.0, step=500.0,
+                                           value=float(submission.get('additional_deductions', 0.0)), key=k("addtax", i))
 
-                # Auto TDS (with manual override)
-                tds_auto = float(preview['tds_amount'])
-                new_tds = st.number_input("Revised TDS (override if needed)", 0.0, step=500.0, value=tds_auto, key=f"tds_{i}")
-                addl_tax_ded = st.number_input("Additional Tax Deductions (if any)", 0.0, step=500.0,
-                                               value=float(submission.get('additional_deductions', 0.0)), key=f"addtax_{i}")
+            revised_total_deductions = preview['total_deductions'] - preview['tds_amount'] + new_tds + addl_tax_ded
+            revised_net_payable = preview['total_earnings'] - revised_total_deductions
 
-                # Revised totals preview using override
-                revised_total_deductions = preview['total_deductions'] - preview['tds_amount'] + new_tds + addl_tax_ded
-                revised_net_payable = preview['total_earnings'] - revised_total_deductions
+            st.markdown("### 🧮 Revised Calculation Preview")
+            p1, p2, p3, p4 = st.columns(4)
+            with p1: create_enhanced_metric_card("Taxable Income", f"₹{preview['taxable_income']:,.0f}", icon="🧾")
+            with p2: create_enhanced_metric_card("TDS (manual)", f"₹{new_tds:,.0f}", delta=f"{(new_tds-tds_auto):+,.0f}", icon="🏛️")
+            with p3: create_enhanced_metric_card("Total Deductions", f"₹{revised_total_deductions:,.0f}", icon="📉")
+            with p4: create_enhanced_metric_card("Net Payable", f"₹{revised_net_payable:,.0f}", delta=f"{(revised_net_payable - preview['net_payable']):+,.0f}", icon="💼")
 
-                st.markdown("### 🧮 Revised Calculation Preview")
-                p1, p2, p3, p4 = st.columns(4)
-                with p1:
-                    create_enhanced_metric_card("Taxable Income", f"₹{preview['taxable_income']:,.0f}", icon="🧾")
-                with p2:
-                    delta_tds = new_tds - tds_auto
-                    create_enhanced_metric_card("TDS (manual)", f"₹{new_tds:,.0f}", delta=f"{delta_tds:+,.0f}", icon="🏛️")
-                with p3:
-                    create_enhanced_metric_card("Total Deductions", f"₹{revised_total_deductions:,.0f}", icon="📉")
-                with p4:
-                    delta_net = revised_net_payable - preview['net_payable']
-                    create_enhanced_metric_card("Net Payable", f"₹{revised_net_payable:,.0f}", delta=f"{delta_net:+,.0f}", icon="💼")
+            # --- Submit section: a form with an actual submit button ---
+            with st.form(k("submit_form", i), clear_on_submit=False):
+                decision = st.selectbox("Decision", ["Approve", "Send Back for Revision"], key=k("decision", i))
+                comments = st.text_area("Comments", value=submission.get('tax_comments', ''), key=k("comments", i))
+                submit_btn = st.form_submit_button("📋 Submit Tax Review", use_container_width=True)
 
-                review_decision = st.selectbox("Decision", ["Approve", "Send Back for Revision"], key=f"decision_{i}")
-                tax_comments = st.text_area("Comments", value=submission.get('tax_comments', ''), key=f"comments_{i}")
+            if submit_btn:
+                # Persist current widget values
+                submission['tax_regime'] = new_tax_regime
+                submission['pt_total'] = pt_edit
 
-                submit_review = st.form_submit_button("📋 Submit Tax Review", use_container_width=True)
-                if submit_review:
-                    # Save: replace preview TDS with manual override and addl tax deductions
-                    submission['tax_regime'] = new_tax_regime
-                    submission['pt_total'] = pt_edit
+                inv_save = dict(preview['investments_data'])
+                inv_save['breakdown'] = inv_dict['breakdown']
+                submission['investments_data'] = inv_save
 
-                    # Save normalized investments (from preview) but keep full breakdown
-                    inv_save = dict(preview['investments_data'])
-                    inv_save['breakdown'] = inv_dict['breakdown']
-                    submission['investments_data'] = inv_save
+                submission['taxable_income'] = preview['taxable_income']
+                submission['tds_amount'] = new_tds
+                submission['additional_deductions'] = addl_tax_ded
+                submission['total_deductions'] = revised_total_deductions
+                submission['net_payable'] = revised_net_payable
 
-                    # Persist the revised totals
-                    submission['taxable_income'] = preview['taxable_income']
-                    submission['tds_amount'] = new_tds
-                    submission['additional_deductions'] = addl_tax_ded
-                    submission['total_deductions'] = revised_total_deductions
-                    submission['net_payable'] = revised_net_payable
+                submission['tax_comments'] = comments
+                submission['tax_reviewed_by'] = st.session_state.get('username', 'Tax Team')
+                submission['tax_review_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+                submission['status'] = 'Tax Approved' if decision == "Approve" else 'Tax Rejected'
 
-                    submission['tax_comments'] = tax_comments
-                    submission['tax_reviewed_by'] = st.session_state.get('username', 'Tax Team')
-                    submission['tax_review_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+                save_fnf_data()
+                if decision == "Approve":
+                    st.success("✅ Approved and saved!")
+                    st.balloons()
+                else:
+                    st.error("❌ Sent back to Payroll for revision.")
+                st.rerun()
 
-                    submission['status'] = 'Tax Approved' if review_decision == "Approve" else 'Tax Rejected'
-
-                    save_fnf_data()
-                    if review_decision == "Approve":
-                        st.success("✅ Approved and saved!")
-                        st.balloons()
-                    else:
-                        st.error("❌ Sent back to Payroll for revision.")
-                    st.rerun()
 def payroll_dashboard():
     """Enhanced Payroll Dashboard (no tax-investment inputs on Payroll)"""
     st.markdown("""
