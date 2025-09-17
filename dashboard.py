@@ -2690,7 +2690,7 @@ def login():
         try:
             _, center_col, _ = st.columns([2, 1, 2])
             with center_col:
-                st.image('assets/koenig-logo.png', width=200)
+                st.image('koenig-logo.png', width=200)
         except Exception:
             st.markdown("""
                 <div style="text-align: center;">
@@ -2804,7 +2804,7 @@ def login():
     try:
         _, center_col, _ = st.columns([2, 1, 2])
         with center_col:
-            st.image('assets/koenig-logo.png', width=200)
+            st.image('koenig-logo.png', width=200)
     except Exception:
         st.markdown("""
             <div style="text-align: center;">
