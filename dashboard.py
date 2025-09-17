@@ -2350,3 +2350,637 @@ def tax_review_dashboard():
                     
                     # Force refresh
                     st.rerun()
+
+def payroll_dashboard():
+    """Enhanced Payroll Dashboard with better styling"""
+    
+    st.markdown("""
+    <div class="main-header">
+        <h1>💼 Payroll Team Dashboard</h1>
+        <p>Comprehensive payroll management and F&F settlement processing</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Enhanced tabs with icons
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👥 Employee Master", "📋 F&F Settlement", "📊 F&F Status", "📈 Analytics", "🎯 Quick Actions"])
+    
+    with tab1:
+        st.markdown("""
+        <div class="employee-card">
+            <h3>👥 Employee Master Data</h3>
+            <p>Search and manage employee information</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        employee_df = load_employee_data()
+        
+        if not employee_df.empty:
+            # Enhanced search
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                search_term = st.text_input("🔍 Search Employee (ID or Name)", placeholder="Enter employee ID or name...")
+            with col2:
+                show_all = st.checkbox("Show All Employees", value=False)
+            
+            if search_term or show_all:
+                if search_term and not show_all:
+                    filtered_df = employee_df[
+                        (employee_df['Employee ID'].astype(str).str.contains(search_term, na=False)) |
+                        (employee_df['Employee Name'].str.contains(search_term, case=False, na=False))
+                    ]
+                else:
+                    filtered_df = employee_df
+                
+                # Enhanced metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    create_enhanced_metric_card("Total Employees", len(filtered_df), icon="👥")
+                with col2:
+                    avg_salary = filtered_df['Salary'].mean() if 'Salary' in filtered_df.columns else 0
+                    create_enhanced_metric_card("Average Salary", f"₹{avg_salary:,.0f}", icon="💰")
+                with col3:
+                    locations = filtered_df['BaseLocation'].nunique() if 'BaseLocation' in filtered_df.columns else 0
+                    create_enhanced_metric_card("Locations", locations, icon="🌍")
+                with col4:
+                    designations = filtered_df['Designation'].nunique() if 'Designation' in filtered_df.columns else 0
+                    create_enhanced_metric_card("Designations", designations, icon="💼")
+                
+                st.dataframe(filtered_df, use_container_width=True, height=400)
+            else:
+                st.markdown("""
+                <div class="info-card">
+                    💡 Enter search terms or check "Show All Employees" to view data
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.error("Could not load employee data")
+    
+    with tab2:
+        fnf_settlement_form()
+    
+    with tab3:
+        st.markdown("""
+        <div class="employee-card">
+            <h3>📊 F&F Settlement Status</h3>
+            <p>Track and manage all F&F settlement submissions</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if 'fnf_submissions' in st.session_state and st.session_state.fnf_submissions:
+            # Enhanced status overview
+            status_counts = {}
+            total_amounts = {}
+            
+            for submission in st.session_state.fnf_submissions:
+                status = submission['status']
+                status_counts[status] = status_counts.get(status, 0) + 1
+                total_amounts[status] = total_amounts.get(status, 0) + submission.get('net_payable', 0)
+            
+            # Status metrics
+            st.markdown("### 📈 Status Overview")
+            cols = st.columns(len(status_counts))
+            for i, (status, count) in enumerate(status_counts.items()):
+                with cols[i]:
+                    create_enhanced_metric_card(
+                        status, 
+                        count, 
+                        delta=f"₹{total_amounts[status]:,.0f}", 
+                        icon="📋"
+                    )
+            
+            st.markdown("---")
+            
+            # Individual submissions
+            for submission in st.session_state.fnf_submissions:
+                status_badge = create_status_badge(submission['status'])
+                
+                with st.expander(f"{submission['employee_name']} - {submission['status']}", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>👤 Employee Info</h4>
+                            <p><strong>Employee:</strong> {submission['employee_name']}</p>
+                            <p><strong>Employee ID:</strong> {submission['employee_id']}</p>
+                            <p><strong>Last Working Day:</strong> {submission['last_working_day']}</p>
+                            <p><strong>Tax Regime:</strong> {submission['tax_regime']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if 'active_months' in submission:
+                            months_list = list(submission['active_months'].keys())
+                            st.markdown(f"**Months:** {', '.join(months_list)}")
+                    
+                    with col2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>💰 Financial Summary</h4>
+                            <p><strong>Status:</strong> {status_badge}</p>
+                            <p><strong>Total Earnings:</strong> ₹{submission['total_earnings']:,.2f}</p>
+                            <p><strong>Total Deductions:</strong> ₹{submission['total_deductions']:,.2f}</p>
+                            <p><strong>Net Payable:</strong> ₹{submission['net_payable']:,.2f}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if 'salary_totals' in submission:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 Salary Details</h4>
+                                <p><strong>Basic Salary:</strong> ₹{submission['salary_totals']['prorated_basic']:,.2f}</p>
+                                <p><strong>HRA:</strong> ₹{submission['salary_totals']['prorated_hra']:,.2f}</p>
+                                <p><strong>EPF:</strong> ₹{submission['salary_totals'].get('total_epf', 0):,.2f}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        if submission['status'] == 'Tax Approved':
+                            if st.button(f"💰 Process Payment", key=f"pay_{submission['employee_id']}"):
+                                submission['status'] = 'Payment Processed'
+                                submission['payment_processed_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+                                save_fnf_data()  # Save to file
+                                st.success("✅ Payment processed!")
+                                st.rerun()
+                        
+                        elif submission['status'] == 'Tax Rejected':
+                            if st.button(f"📝 Edit & Resubmit", key=f"edit_{submission['employee_id']}"):
+                                st.info("Go to F&F Settlement tab to edit")
+                    
+                    # Show investment details for Old Tax Regime
+                    if (submission['tax_regime'] == 'Old Tax Regime' and 
+                        'investments_data' in submission and submission['investments_data']):
+                        st.markdown(f"""
+                        <div class="info-card">
+                            <h4>💼 Investment Benefits</h4>
+                            <p>Tax Deductions: ₹{submission['investments_data']['total_deductions']:,.0f}</p>
+                            <p>Exempt Allowances: ₹{submission['investments_data']['exempt_allowances']:,.0f}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Show tax comments
+                    if 'tax_comments' in submission and submission['tax_comments']:
+                        st.markdown(f"""
+                        <div class="info-card">
+                            <h4>💬 Tax Team Comments</h4>
+                            <p>{submission['tax_comments']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="info-card">
+                📋 No F&F settlements submitted yet
+            </div>
+            """, unsafe_allow_html=True)
+
+    with tab4:
+        st.markdown("""
+        <div class="employee-card">
+            <h3>📈 Analytics & Reports</h3>
+            <p>Visual analytics and insights for F&F settlements</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Create analytics charts
+        create_analytics_charts()
+        
+        # Additional analytics
+        employee_df = load_employee_data()
+        
+        if not employee_df.empty:
+            st.markdown("### 📊 Employee Statistics")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                create_enhanced_metric_card("Total Employees", len(employee_df), icon="👥")
+            with col2:
+                avg_salary = employee_df['Salary'].mean() if 'Salary' in employee_df.columns else 0
+                create_enhanced_metric_card("Average Salary", f"₹{avg_salary:,.0f}", icon="💰")
+            with col3:
+                if 'fnf_submissions' in st.session_state:
+                    pending_fnf = len([s for s in st.session_state.fnf_submissions if s['status'] != 'Payment Processed'])
+                    create_enhanced_metric_card("Pending F&F", pending_fnf, icon="📋")
+                else:
+                    create_enhanced_metric_card("Pending F&F", 0, icon="📋")
+            with col4:
+                locations = employee_df['BaseLocation'].nunique() if 'BaseLocation' in employee_df.columns else 0
+                create_enhanced_metric_card("Locations", locations, icon="🌍")
+
+    with tab5:
+        st.markdown("""
+        <div class="employee-card">
+            <h3>🎯 Quick Actions</h3>
+            <p>Frequently used actions and shortcuts</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>📊 Bulk Operations</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("📤 Export All F&F Data", use_container_width=True):
+                st.info("📊 F&F data export functionality ready for implementation")
+            
+            if st.button("📥 Import Employee Data", use_container_width=True):
+                st.info("📥 Employee data import functionality ready for implementation")
+        
+        with col2:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>🔄 System Actions</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🔄 Refresh Data", use_container_width=True):
+                st.cache_data.clear()
+                st.success("✅ Data refreshed successfully!")
+                st.rerun()
+            
+            if st.button("📊 Generate Report", use_container_width=True):
+                st.info("📊 Report generation functionality ready")
+        
+        with col3:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>⚙️ Settings</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("⚙️ System Settings", use_container_width=True):
+                st.info("⚙️ System settings panel ready for configuration")
+            
+            if st.button("📋 View Logs", use_container_width=True):
+                st.info("📋 System logs viewer ready for implementation")
+
+def login():
+    """Enhanced login page with professional styling for real users"""
+    
+    # Load custom CSS for login page
+    st.markdown("""
+        <style>
+        .login-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 3rem;
+            border-radius: 20px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            margin: 2rem 0;
+        }
+        
+        .logo-section {
+            display: grid;
+            place-items: center;
+            width: 100%;
+            margin-bottom: 2rem;
+        }
+        
+        .main-title {
+            color: #1f4e79;
+            font-size: 2.2rem;
+            font-weight: 600;
+            margin: 0;
+            text-align: center;
+        }
+        
+        .production-tag {
+            background: #28a745;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 25px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        
+        .feature-highlight {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            backdrop-filter: blur(10px);
+            text-align: left;
+        }
+        
+        .perfect-center {
+            display: grid;
+            place-items: center;
+            width: 100%;
+            gap: 20px;
+            text-align: center;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    users = load_users()
+
+    # 🔹 CHECK: If user needs to set password for the first time (NO current password required)
+    if st.session_state.get("needs_password_setup"):
+        username = st.session_state.get("username")
+        
+        st.markdown('<div class="perfect-center">', unsafe_allow_html=True)
+        
+        # Logo section
+        st.markdown('<div class="logo-section">', unsafe_allow_html=True)
+        try:
+            _, center_col, _ = st.columns([2, 1, 2])
+            with center_col:
+                st.image('assets/koenig-logo.png', width=200)
+        except Exception:
+            st.markdown("""
+                <div style="text-align: center;">
+                    <h1 style="color: #667eea; font-size: 3rem;">🏢</h1>
+                    <h2 style="color: #667eea; margin: 0;">Koenig Solutions</h2>
+                </div>
+            """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown(f"""
+            <div class="login-container">
+                <h1 class="main-title" style="color: white;">Welcome, {username}!</h1>
+                <div class="production-tag">First Time Setup - Create Your Password</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div class="employee-card">
+                <h3>🔐 Create Your Password</h3>
+                <p>Please create a secure password for your account.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 🔥 DIRECT PASSWORD SETUP FORM (No function call that might have bugs)
+            with st.form("first_time_password_setup", clear_on_submit=False):
+                st.markdown("### ✅ **Set Up Your Password**")
+                
+                new_password = st.text_input(
+                    "Create Password",
+                    type="password",
+                    help="Use 8+ chars with upper, lower, digit & special character.",
+                    key="new_password_setup"
+                )
+                
+                confirm_password = st.text_input(
+                    "Confirm Password",
+                    type="password",
+                    key="confirm_password_setup"
+                )
+                
+                setup_submit = st.form_submit_button("✅ Create Password", use_container_width=True)
+                
+                if setup_submit:
+                    # Validate password
+                    if not new_password:
+                        st.error("Please enter a password.")
+                    elif len(new_password) < 8:
+                        st.error("Password must be at least 8 characters long.")
+                    elif not any(c.islower() for c in new_password):
+                        st.error("Password must contain at least one lowercase letter.")
+                    elif not any(c.isupper() for c in new_password):
+                        st.error("Password must contain at least one uppercase letter.")
+                    elif not any(c.isdigit() for c in new_password):
+                        st.error("Password must contain at least one digit.")
+                    elif not any(not c.isalnum() for c in new_password):
+                        st.error("Password must contain at least one special character.")
+                    elif new_password != confirm_password:
+                        st.error("Passwords do not match.")
+                    else:
+                        # Set password
+                        if set_password(username, new_password):
+                            # Clear setup flags
+                            st.session_state.pop("needs_password_setup", None)
+                            
+                            # Set user as logged in
+                            user_data = users[username]
+                            st.session_state["role"] = user_data["role"]
+                            st.session_state["username"] = username
+                            
+                            # Load F&F data
+                            try:
+                                load_fnf_data()
+                            except Exception:
+                                pass
+                            
+                            st.success(f"🎉 Password created! Welcome to the F&F Settlement System!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("Failed to set password. Please try again.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    # 🔹 CHECK: If user needs to change existing password (current password required)
+    if st.session_state.get("must_change_password") and st.session_state.get("username"):
+        st.markdown('<div class="perfect-center">', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div class="warning-card">
+                🔄 <strong>Password Change Required</strong><br>
+                Your password must be updated before continuing.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Call function with current password required
+            change_password_ui(location="main", require_current=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    # 🔹 REGULAR LOGIN FORM
+    st.markdown('<div class="perfect-center">', unsafe_allow_html=True)
+
+    # Logo Section
+    st.markdown('<div class="logo-section">', unsafe_allow_html=True)
+    try:
+        _, center_col, _ = st.columns([2, 1, 2])
+        with center_col:
+            st.image('assets/koenig-logo.png', width=200)
+    except Exception:
+        st.markdown("""
+            <div style="text-align: center;">
+                <h1 style="color: #667eea; font-size: 3rem;">🏢</h1>
+                <h2 style="color: #667eea; margin: 0;">Koenig Solutions</h2>
+            </div>
+        """, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Header
+    st.markdown("""
+        <div class="login-container">
+            <h1 class="main-title" style="color: white;">F&F Settlement System - Production</h1>
+            <div class="production-tag">Real User Authentication System</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Main login content
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div class="employee-card">
+            <h2 style="text-align: center;">🔐 System Login</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # System capabilities
+        st.markdown("### ✨ Production System Features")
+        features = [
+            "Real user authentication with secure password hashing",
+            "First-time login password setup for new users", 
+            "Multi-month salary processing with prorated calculations",
+            "Automatic salary breakdown (Basic/HRA/Special Allowances)", 
+            "Investment deductions for Old Tax Regime",
+            "EPF calculation with Employee Master policy",
+            "Auto-gratuity calculation using (n × b × 15) ÷ 26 formula",
+            "Dual tax regime support (Old/New)",
+            "Comprehensive tax calculations with TDS",
+            "Role-based dashboards (Payroll + Tax Team)",
+            "Real-time data persistence between user sessions",
+            "Professional UI with enhanced analytics"
+        ]
+        
+        for feature in features:
+            st.markdown(f"""
+            <div class="feature-highlight">
+                ✅ {feature}
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("### 🔑 Access System")
+
+        # Login form
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input(
+                "👤 Username", 
+                placeholder="Enter your username", 
+                key="auth_username"
+            )
+            password = st.text_input(
+                "🔒 Password", 
+                type="password", 
+                placeholder="Enter your password (leave blank for first-time setup)", 
+                key="auth_password"
+            )
+            submit_login = st.form_submit_button(
+                "🚀 Login to System", 
+                use_container_width=True
+            )
+
+        if submit_login:
+            if not username:
+                st.error("Please enter your username.")
+                return
+                
+            # Check if user exists
+            if username not in users:
+                st.error("❌ User not found. Please contact administrator.")
+                return
+            
+            user_data = users[username]
+            
+            # 🔥 FIRST TIME USER (no password set)
+            if not user_data.get("password_hash"):
+                st.session_state["username"] = username
+                st.session_state["needs_password_setup"] = True  # Use different flag
+                st.success("👋 Welcome! Please create your password.")
+                st.rerun()
+                return
+            
+            # 🔥 EXISTING USER - need password
+            if not password:
+                st.error("❌ Please enter your password.")
+                return
+            
+            # Verify password
+            if verify_user(username, password):
+                st.session_state["role"] = user_data["role"]
+                st.session_state["username"] = username
+                st.session_state["must_change_password"] = bool(user_data.get("must_change_password", False))
+                
+                # Clear any setup flags
+                st.session_state.pop("needs_password_setup", None)
+                
+                try:
+                    load_fnf_data()
+                except Exception:
+                    pass
+                
+                if st.session_state["must_change_password"]:
+                    st.warning("⚠️ You must change your password before continuing.")
+                    st.rerun()
+                else:
+                    st.success(f"✅ Login successful! Welcome, {user_data['role']}")
+                    st.balloons()
+                    st.rerun()
+            else:
+                st.error("❌ Invalid password. Please try again.")
+
+        # User info
+        st.markdown("---")
+        st.markdown("### 👥 **For New Users**")
+        st.markdown("""
+        <div class="info-card">
+            🔐 <strong>New User?</strong><br>
+            Enter your username and leave password blank for first-time setup.
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Current users
+        with st.expander("👥 **Authorized Users**", expanded=False):
+            st.markdown("### Current System Users:")
+            for user, role in REAL_USERS.items():
+                st.markdown(f"• **{user}** - {role}")
+        
+        # Footer
+        st.markdown("---")
+        st.markdown("""
+            <div style='text-align: center; color: #666; font-size: 0.9em; padding: 20px;'>
+                © 2024 Koenig Solutions - F&F Settlement System (Production)<br>
+                <em>Secure Real User Authentication System</em>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def main():
+    st.set_page_config(
+        page_title="F&F Settlement System - Production",
+        page_icon="💼",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize session state
+    if 'fnf_submissions' not in st.session_state:
+        st.session_state.fnf_submissions = []
+    
+    # Load F&F data on startup
+    if 'fnf_submissions' not in st.session_state or not st.session_state.fnf_submissions:
+        load_fnf_data()
+    
+    # Add sidebar logo for all authenticated pages
+    if 'role' in st.session_state:
+        add_sidebar_logo()
+    
+    # Show appropriate page based on authentication
+    if 'role' not in st.session_state:
+        login()
+    elif st.session_state['role'] == 'Payroll Team':
+        payroll_dashboard()
+    elif st.session_state['role'] == 'Tax Team':
+        tax_review_dashboard()
+    else:
+        st.error("Unknown role")
+
+if __name__ == "__main__":
+    main()
