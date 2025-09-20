@@ -885,9 +885,14 @@ def _fy_start_year_from_session() -> int:
 def tds_old_from_total_income(total_income: float) -> float:
     """Old Regime: expects TOTAL INCOME already after std. deduction & investments."""
     ti = max(0.0, float(total_income))
-    if ti <= 500_000.0:  # 87A rebate
+    
+    # 87A rebate - no tax if income <= 5 lakh
+    if ti <= 500_000.0:
         return 0.0
+    
     tax = 0.0
+    
+    # Tax slabs for Old Regime
     if ti > 1_000_000.0:
         tax += (ti - 1_000_000.0) * 0.30
         ti = 1_000_000.0
@@ -896,34 +901,72 @@ def tds_old_from_total_income(total_income: float) -> float:
         ti = 500_000.0
     if ti > 250_000.0:
         tax += (ti - 250_000.0) * 0.05
-    return round(tax * 1.04, 2)  # 4% cess
+    
+    # Add 4% cess
+    final_tax = tax * 1.04
+    return round(final_tax, 2)
 
 def tds_new_from_total_income(total_income: float) -> float:
     """New Regime (FY-aware): expects TOTAL INCOME already after std. deduction."""
     fy_start = _fy_start_year_from_session()
     ti = max(0.0, float(total_income))
-    if fy_start >= 2025:  # FY 2025-26+
-        edges = (0.0, 400_000.0, 800_000.0, 1_200_000.0, 1_600_000.0, 2_000_000.0, 2_400_000.0, float("inf"))
-        rates = (0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
-        rebate_threshold = 1_200_000.0
-    else:                 # FY 2024-25
-        edges = (0.0, 300_000.0, 600_000.0, 900_000.0, 1_200_000.0, 1_500_000.0, float("inf"))
-        rates = (0.00, 0.05, 0.10, 0.15, 0.20, 0.30)
-        rebate_threshold = 700_000.0
-
-    if ti <= rebate_threshold:  # 87A rebate
-        return 0.0
-
-    tax = 0.0
-    for i in range(1, len(edges)):
-        low, high = edges[i-1], edges[i]
-        rate = rates[i-1]
-        if ti > low:
-            tax += (min(ti, high) - low) * rate
-        else:
-            break
-    return round(tax * 1.04, 2)
-
+    
+    # FY 2025-26+ slabs
+    if fy_start >= 2025:
+        if ti <= 400_000.0:
+            return 0.0
+        
+        tax = 0.0
+        if ti > 2_400_000.0:
+            tax += (ti - 2_400_000.0) * 0.30
+            ti = 2_400_000.0
+        if ti > 2_000_000.0:
+            tax += (ti - 2_000_000.0) * 0.25
+            ti = 2_000_000.0
+        if ti > 1_600_000.0:
+            tax += (ti - 1_600_000.0) * 0.20
+            ti = 1_600_000.0
+        if ti > 1_200_000.0:
+            tax += (ti - 1_200_000.0) * 0.15
+            ti = 1_200_000.0
+        if ti > 800_000.0:
+            tax += (ti - 800_000.0) * 0.10
+            ti = 800_000.0
+        if ti > 400_000.0:
+            tax += (ti - 400_000.0) * 0.05
+        
+        # 87A rebate for income <= 12 lakh
+        if total_income <= 1_200_000.0:
+            return 0.0
+    else:
+        # FY 2024-25 slabs
+        if ti <= 300_000.0:
+            return 0.0
+            
+        tax = 0.0
+        if ti > 1_500_000.0:
+            tax += (ti - 1_500_000.0) * 0.30
+            ti = 1_500_000.0
+        if ti > 1_200_000.0:
+            tax += (ti - 1_200_000.0) * 0.20
+            ti = 1_200_000.0
+        if ti > 900_000.0:
+            tax += (ti - 900_000.0) * 0.15
+            ti = 900_000.0
+        if ti > 600_000.0:
+            tax += (ti - 600_000.0) * 0.10
+            ti = 600_000.0
+        if ti > 300_000.0:
+            tax += (ti - 300_000.0) * 0.05
+        
+        # 87A rebate for income <= 7 lakh
+        if total_income <= 700_000.0:
+            return 0.0
+    
+    # Add 4% cess
+    final_tax = tax * 1.04
+    return round(final_tax, 2)
+    
 def calculate_years_of_service(doj_str, last_working_day):
     """Calculate years of service from DOJ to last working day"""
     try:
@@ -1862,11 +1905,11 @@ def fnf_settlement_form_payroll_only():
             tenure_years = years_for_gratuity(
                 doj_dt, datetime.combine(last_working_day, datetime.min.time())
             )
-            last_basic_da = employee_monthly_salary / 3.0
+            last_basic_da = round(employee_monthly_salary / 3.0, 2)
             auto_gratuity = calculate_gratuity(tenure_years, last_basic_da)
 
             st.caption("💡 Gratuity uses > 6 months counted as +1 year; Last Basic = Salary ÷ 3")
-            gratuity = st.number_input("🏆 Gratuity (₹)", value=float(auto_gratuity), min_value=0.0)
+            gratuity = st.number_input("🏆 Gratuity (₹)", value=round(auto_gratuity, 2), min_value=0.0, step=100.0)
 
             # Enhanced Gratuity calculation details
             with st.expander("🏦 Gratuity Calculation Details", expanded=True):
@@ -1910,8 +1953,8 @@ def fnf_settlement_form_payroll_only():
                         """, unsafe_allow_html=True)
 
             # Additional positives  
-            bonus = st.number_input("🎁 Bonus (₹)", value=0.0, min_value=0.0)
-            leave_encashment = st.number_input("🏖️ Leave Encashment (₹)", value=0.0, min_value=0.0)
+            bonus = st.number_input("🎁 Bonus (₹)", value=0.0, min_value=0.0, step=100.0)
+            leave_encashment = st.number_input("🏖️ Leave Encashment (₹)", value=0.0, min_value=0.0, step=100.0)
 
         with col2:
             st.markdown("### 📉 Payroll Deductions Only")
@@ -1919,7 +1962,7 @@ def fnf_settlement_form_payroll_only():
             # PT only for Chennai and Bangalore
             pt_enabled = str(employee['BaseLocation']).lower() in ['chennai', 'bangalore']
             if pt_enabled:
-                pt_total = st.number_input("🏛️ PT - Professional Tax Total (₹)", value=0.0, min_value=0.0)
+                pt_total = st.number_input("🏛️ PT - Professional Tax Total (₹)", value=0.0, min_value=0.0, step=50.0)
                 st.markdown("""
                 <div class="success-card">
                     ✅ PT applicable for Chennai/Bangalore
@@ -1933,11 +1976,11 @@ def fnf_settlement_form_payroll_only():
                 </div>
                 """, unsafe_allow_html=True)
 
-            salary_advance = st.number_input("💳 Salary Advance (₹)", value=0.0, min_value=0.0)
-            tada_recovery = st.number_input("🚗 TADA Recovery (₹)", value=0.0, min_value=0.0)
-            wfh_recovery = st.number_input("🏠 WFH Recovery (₹)", value=0.0, min_value=0.0)
-            notice_period_recovery = st.number_input("⏰ Notice Period Recovery (₹)", value=0.0, min_value=0.0)
-            other_deductions = st.number_input("📝 Other Deductions (₹)", value=0.0, min_value=0.0)
+            salary_advance = st.number_input("💳 Salary Advance (₹)", value=0.0, min_value=0.0, step=100.0)
+            tada_recovery = st.number_input("🚗 TADA Recovery (₹)", value=0.0, min_value=0.0, step=100.0)
+            wfh_recovery = st.number_input("🏠 WFH Recovery (₹)", value=0.0, min_value=0.0, step=100.0)
+            notice_period_recovery = st.number_input("⏰ Notice Period Recovery (₹)", value=0.0, min_value=0.0, step=100.0)
+            other_deductions = st.number_input("📝 Other Deductions (₹)", value=0.0, min_value=0.0, step=100.0)
 
             # Information about tax calculation
             st.markdown("""
@@ -1959,15 +2002,15 @@ def fnf_settlement_form_payroll_only():
         st.session_state.calculation_data = {
             'resignation_date': resignation_date,
             'last_working_day': last_working_day,
-            'gratuity': gratuity,
-            'bonus': bonus,
-            'leave_encashment': leave_encashment,
-            'pt_total': pt_total,
-            'salary_advance': salary_advance,
-            'tada_recovery': tada_recovery,
-            'wfh_recovery': wfh_recovery,
-            'notice_period_recovery': notice_period_recovery,
-            'other_deductions': other_deductions,
+            'gratuity': round(gratuity, 2),
+            'bonus': round(bonus, 2),
+            'leave_encashment': round(leave_encashment, 2),
+            'pt_total': round(pt_total, 2),
+            'salary_advance': round(salary_advance, 2),
+            'tada_recovery': round(tada_recovery, 2),
+            'wfh_recovery': round(wfh_recovery, 2),
+            'notice_period_recovery': round(notice_period_recovery, 2),
+            'other_deductions': round(other_deductions, 2),
             'tenure_years': tenure_years,
             'last_basic_da': last_basic_da
         }
@@ -1978,29 +2021,29 @@ def fnf_settlement_form_payroll_only():
 
         # ---- Totals from active months (earnings components only) ----
         totals = {
-            'total_salary': sum(m['total_salary'] for m in active_months.values()),
-            'prorated_total': sum(m['prorated_salary'] for m in active_months.values()),
-            'prorated_basic': sum(m['prorated_basic'] for m in active_months.values()),
-            'prorated_hra': sum(m['prorated_hra'] for m in active_months.values()),
-            'prorated_special': sum(m['prorated_special'] for m in active_months.values()),
-            'total_epf': sum(m['epf'] for m in active_months.values()),
-            'total_esi': sum(m['esi'] for m in active_months.values()),
+            'total_salary': round(sum(m['total_salary'] for m in active_months.values()), 2),
+            'prorated_total': round(sum(m['prorated_salary'] for m in active_months.values()), 2),
+            'prorated_basic': round(sum(m['prorated_basic'] for m in active_months.values()), 2),
+            'prorated_hra': round(sum(m['prorated_hra'] for m in active_months.values()), 2),
+            'prorated_special': round(sum(m['prorated_special'] for m in active_months.values()), 2),
+            'total_epf': round(sum(m['epf'] for m in active_months.values()), 2),
+            'total_esi': round(sum(m['esi'] for m in active_months.values()), 2),
         }
 
         # ---- Payroll calculation (NO TAX CALCULATIONS HERE) ----
-        total_earnings = totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment']
+        total_earnings = round(totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment'], 2)
 
         # ---- Payroll deductions only ----
-        payroll_deductions = (
+        payroll_deductions = round(
             totals['total_epf'] + totals['total_esi'] + data['salary_advance'] + data['tada_recovery'] +
-            data['wfh_recovery'] + data['notice_period_recovery'] + data['other_deductions']
+            data['wfh_recovery'] + data['notice_period_recovery'] + data['other_deductions'], 2
         )
 
         # PT deduction
-        pt_deduction = float(data.get('pt_total', 0.0) or 0.0)
+        pt_deduction = data['pt_total']
 
         # Net before tax (Tax Team will calculate final TDS)
-        net_before_tax = total_earnings - payroll_deductions - pt_deduction
+        net_before_tax = round(total_earnings - payroll_deductions - pt_deduction, 2)
 
         # Enhanced results display
         st.markdown("---")
@@ -2170,10 +2213,6 @@ def fnf_settlement_form_payroll_only():
             if st.button("📄 Payroll Report", use_container_width=True):
                 st.info("📄 Payroll F&F report generated! Tax calculations pending.")
 
-# File constants
-FNF_FILE = "fnf_submissions.json"
-FNF_CLOSED_FILE = "fnf_closed.json"
-
 def load_fnf_closed_data():
     try:
         if os.path.exists(FNF_CLOSED_FILE):
@@ -2311,7 +2350,7 @@ def recompute_tax_updated(submission: dict, inv: dict, new_regime: str):
     }
     
 def tax_review_dashboard_updated():
-    """Updated Tax Review Dashboard with regime-specific deduction inputs"""
+    """Updated Tax Review Dashboard with regime-specific deduction inputs and proper tax calculations"""
     st.markdown("""
     <div class="main-header">
         <h1>🔍 Tax Review Dashboard</h1>
@@ -2337,14 +2376,14 @@ def tax_review_dashboard_updated():
         with st.expander(f"{submission['employee_name']} (ID: {submission['employee_id']}) – {submission['status']}", expanded=True):
             # Header metrics
             c1, c2, c3 = st.columns(3)
-            with c1: create_enhanced_metric_card("Taxable Income", f"₹{submission.get('taxable_income', 0):,.0f}", icon="📄")
-            with c2: create_enhanced_metric_card("Current TDS", f"₹{submission.get('tds_amount', 0):,.0f}", icon="🏛️")
-            with c3: create_enhanced_metric_card("Net Payable", f"₹{submission.get('net_payable', 0):,.0f}", icon="💼")
+            with c1: create_enhanced_metric_card("Net Before Tax", f"₹{submission.get('net_before_tax', 0):,.2f}", icon="💰")
+            with c2: create_enhanced_metric_card("Current TDS", f"₹{submission.get('tds_amount', 0):,.2f}", icon="🏛️")
+            with c3: create_enhanced_metric_card("Final Net Payable", f"₹{submission.get('net_payable', 0):,.2f}", icon="💼")
 
             inv_saved = submission.get('investments_data', {}) or {}
             breakdown_saved = inv_saved.get('breakdown', {})
 
-            st.markdown("### 🏛️ Tax Regime Selection")
+            st.markdown("### 🏛️ Tax Regime Selection & Investment Deductions")
             # Regime selection
             new_tax_regime = st.selectbox(
                 "Tax Regime",
@@ -2387,13 +2426,17 @@ def tax_review_dashboard_updated():
             if new_tax_regime == "New Tax Regime":
                 # NEW REGIME: Only 80CCD(2)
                 st.markdown("#### 🏦 Available Deductions (New Tax Regime)")
-                nps2 = st.number_input("🏢 NPS 80CCD(2) Employer Contribution", 0.0, step=1000.0, 
-                                       value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
+                nps2 = st.number_input(
+                    "🏢 NPS 80CCD(2) Employer Contribution", 
+                    0.0, step=1000.0, 
+                    value=round(float(breakdown_saved.get('nps_80ccd_2', 0.0)), 2), 
+                    key=k("nps2", i)
+                )
                 
                 # Create investment dict for NEW regime (only NPS 80CCD(2))
                 inv_dict = {
                     'breakdown': {
-                        'nps_80ccd_2': nps2,
+                        'nps_80ccd_2': round(nps2, 2),
                         # All other fields set to 0
                         'ppf': 0.0, 'epf_employee': 0.0, 'elss': 0.0, 'life_insurance': 0.0,
                         'fd_5year': 0.0, 'nsc': 0.0, 'suknya_samriddhi': 0.0, 'tuition_fees': 0.0,
@@ -2410,91 +2453,132 @@ def tax_review_dashboard_updated():
                 st.markdown("#### 📊 Section 80C (Max ₹1,50,000)")
                 c80c1, c80c2 = st.columns(2)
                 with c80c1:
-                    ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=float(breakdown_saved.get('ppf', 0.0)), key=k("ppf", i))
+                    ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=round(float(breakdown_saved.get('ppf', 0.0)), 2), key=k("ppf", i))
                     epf_default = breakdown_saved.get('epf_employee')
                     if epf_default is None:
                         epf_default = float(submission.get('salary_totals', {}).get('total_epf', 0.0))
-                    epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=float(epf_default), key=k("epfemp", i))
-                    elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=float(breakdown_saved.get('elss', 0.0)), key=k("elss", i))
-                    life = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=float(breakdown_saved.get('life_insurance', 0.0)), key=k("life", i))
+                    epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=round(float(epf_default), 2), key=k("epfemp", i))
+                    elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=round(float(breakdown_saved.get('elss', 0.0)), 2), key=k("elss", i))
+                    life = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=round(float(breakdown_saved.get('life_insurance', 0.0)), 2), key=k("life", i))
                 with c80c2:
-                    fd5 = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=float(breakdown_saved.get('fd_5year', 0.0)), key=k("fd5", i))
-                    nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=float(breakdown_saved.get('nsc', 0.0)), key=k("nsc", i))
-                    suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=float(breakdown_saved.get('suknya_samriddhi', 0.0)), key=k("suk", i))
-                    tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=float(breakdown_saved.get('tuition_fees', 0.0)), key=k("tuition", i))
+                    fd5 = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=round(float(breakdown_saved.get('fd_5year', 0.0)), 2), key=k("fd5", i))
+                    nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=round(float(breakdown_saved.get('nsc', 0.0)), 2), key=k("nsc", i))
+                    suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=round(float(breakdown_saved.get('suknya_samriddhi', 0.0)), 2), key=k("suk", i))
+                    tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=round(float(breakdown_saved.get('tuition_fees', 0.0)), 2), key=k("tuition", i))
 
                 # 80D & Others
                 st.markdown("#### 🏥 Health & Other Deductions")
                 d1, d2 = st.columns(2)
                 with d1:
-                    hi_self = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_self', 0.0)), key=k("hi_self", i))
-                    hi_par = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_parents', 0.0)), key=k("hi_par", i))
-                    sec_dd = st.number_input("♿ 80DD", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80dd', 0.0)), key=k("80dd", i))
-                    sec_ddb = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80ddb', 0.0)), key=k("80ddb", i))
+                    hi_self = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=round(float(breakdown_saved.get('health_insurance_self', 0.0)), 2), key=k("hi_self", i))
+                    hi_par = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=round(float(breakdown_saved.get('health_insurance_parents', 0.0)), 2), key=k("hi_par", i))
+                    sec_dd = st.number_input("♿ 80DD", 0.0, step=1000.0, value=round(float(breakdown_saved.get('section_80dd', 0.0)), 2), key=k("80dd", i))
+                    sec_ddb = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=round(float(breakdown_saved.get('section_80ddb', 0.0)), 2), key=k("80ddb", i))
                 with d2:
-                    hli = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=float(breakdown_saved.get('home_loan_interest', 0.0)), key=k("hli", i))
-                    eli = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=float(breakdown_saved.get('education_loan_interest', 0.0)), key=k("eli", i))
-                    nps1b = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_1b', 0.0)), key=k("nps1b", i))
-                    nps2 = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
+                    hli = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=round(float(breakdown_saved.get('home_loan_interest', 0.0)), 2), key=k("hli", i))
+                    eli = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=round(float(breakdown_saved.get('education_loan_interest', 0.0)), 2), key=k("eli", i))
+                    nps1b = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=round(float(breakdown_saved.get('nps_80ccd_1b', 0.0)), 2), key=k("nps1b", i))
+                    nps2 = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=round(float(breakdown_saved.get('nps_80ccd_2', 0.0)), 2), key=k("nps2", i))
 
                 # Exempt allowances
-                st.markdown("#### 🚗 Exempt Allowances")
+                st.markdown("#### 🚗 Exempt Allowances (Old Regime Only)")
                 a1, a2 = st.columns(2)
                 with a1:
-                    conv = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=float(breakdown_saved.get('conveyance_allowance', 0.0)), key=k("conv", i))
-                    helper = st.number_input("🏠 Helper", 0.0, step=500.0, value=float(breakdown_saved.get('helper_allowance', 0.0)), key=k("helper", i))
-                    lta = st.number_input("✈️ LTA", 0.0, step=5000.0, value=float(breakdown_saved.get('lta', 0.0)), key=k("lta", i))
+                    conv = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=round(float(breakdown_saved.get('conveyance_allowance', 0.0)), 2), key=k("conv", i))
+                    helper = st.number_input("🏠 Helper", 0.0, step=500.0, value=round(float(breakdown_saved.get('helper_allowance', 0.0)), 2), key=k("helper", i))
+                    lta = st.number_input("✈️ LTA", 0.0, step=5000.0, value=round(float(breakdown_saved.get('lta', 0.0)), 2), key=k("lta", i))
                 with a2:
-                    tel = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=float(breakdown_saved.get('tel_broadband', 0.0)), key=k("tel", i))
-                    ld = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=k("ld", i))
-                    hra_ex = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=k("hraex", i))
+                    tel = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=round(float(breakdown_saved.get('tel_broadband', 0.0)), 2), key=k("tel", i))
+                    ld = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=round(float(breakdown_saved.get('ld_allowance', 0.0)), 2), key=k("ld", i))
+                    hra_ex = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=round(float(breakdown_saved.get('hra_exemption', 0.0)), 2), key=k("hraex", i))
 
                 # Create investment dict for OLD regime (all deductions)
                 inv_dict = {
                     'breakdown': {
-                        'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life,
-                        'fd_5year': fd5, 'nsc': nsc, 'suknya_samriddhi': suk, 'tuition_fees': tuition,
-                        'health_insurance_self': hi_self, 'health_insurance_parents': hi_par,
-                        'section_80dd': sec_dd, 'section_80ddb': sec_ddb,
-                        'home_loan_interest': hli, 'education_loan_interest': eli,
-                        'nps_80ccd_1b': nps1b, 'nps_80ccd_2': nps2,
-                        'conveyance_allowance': conv, 'helper_allowance': helper, 'lta': lta,
-                        'tel_broadband': tel, 'ld_allowance': ld, 'hra_exemption': hra_ex
+                        'ppf': round(ppf, 2), 'epf_employee': round(epf_employee, 2), 'elss': round(elss, 2), 'life_insurance': round(life, 2),
+                        'fd_5year': round(fd5, 2), 'nsc': round(nsc, 2), 'suknya_samriddhi': round(suk, 2), 'tuition_fees': round(tuition, 2),
+                        'health_insurance_self': round(hi_self, 2), 'health_insurance_parents': round(hi_par, 2),
+                        'section_80dd': round(sec_dd, 2), 'section_80ddb': round(sec_ddb, 2),
+                        'home_loan_interest': round(hli, 2), 'education_loan_interest': round(eli, 2),
+                        'nps_80ccd_1b': round(nps1b, 2), 'nps_80ccd_2': round(nps2, 2),
+                        'conveyance_allowance': round(conv, 2), 'helper_allowance': round(helper, 2), 'lta': round(lta, 2),
+                        'tel_broadband': round(tel, 2), 'ld_allowance': round(ld, 2), 'hra_exemption': round(hra_ex, 2)
                     }
                 }
 
             # PT editable by tax team
             pt_edit = st.number_input("🏛️ PT (u/s 16(iii))", 0.0, step=100.0,
-                                      value=float(submission.get('pt_total', 0.0)), key=k("pt", i))
+                                      value=round(float(submission.get('pt_total', 0.0)), 2), key=k("pt", i))
 
             # Live preview with updated calculation
             sub_preview = dict(submission)
             sub_preview['pt_total'] = pt_edit
             preview = recompute_tax_updated(sub_preview, inv_dict, new_tax_regime)
 
+            # Tax calculation breakdown display
+            st.markdown("### 🧮 Live Tax Calculation Preview")
+            
+            # Show detailed tax calculation
+            tax_calc_col1, tax_calc_col2 = st.columns(2)
+            
+            with tax_calc_col1:
+                st.markdown(f"""
+                <div class="calculation-box">
+                    <h4>📊 Taxable Income Calculation</h4>
+                    <p><strong>Taxable Earnings:</strong> ₹{preview['taxable_earnings']:,.2f}</p>
+                    <p><em>(Salary + Bonus + Leave Encashment, excludes Gratuity)</em></p>
+                    <p><strong>Less: Standard Deduction:</strong> -₹{preview['std_deduction']:,.2f}</p>
+                    <p><strong>Less: PT u/s 16(iii):</strong> -₹{preview['pt_deduction']:,.2f}</p>
+                    <p><strong>Less: Investment Deductions:</strong> -₹{preview['inv_total_for_tax']:,.2f}</p>
+                    <p><strong>Less: Exempt Allowances:</strong> -₹{preview['exempt_allowances']:,.2f}</p>
+                    <hr>
+                    <p><strong>Final Taxable Income:</strong> ₹{preview['taxable_income']:,.2f}</p>
+                    <p><strong>TDS ({preview['regime']}):</strong> ₹{preview['tds_amount']:,.2f}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with tax_calc_col2:
+                st.markdown(f"""
+                <div class="calculation-box">
+                    <h4>💰 Final Settlement Calculation</h4>
+                    <p><strong>Total Earnings:</strong> ₹{preview['total_earnings']:,.2f}</p>
+                    <p><strong>Less: Payroll Deductions:</strong> -₹{preview['payroll_deductions']:,.2f}</p>
+                    <p><strong>Less: PT:</strong> -₹{preview['pt_deduction']:,.2f}</p>
+                    <p><strong>Less: TDS:</strong> -₹{preview['tds_amount']:,.2f}</p>
+                    <hr>
+                    <p><strong>Net Payable:</strong> ₹{preview['net_payable']:,.2f}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
             # Summary cards (live)
             st.markdown("### 📋 Investment & Deduction Summary")
             s1, s2, s3, s4 = st.columns(4)
-            with s1: create_enhanced_metric_card("80C (cap ₹1.5L)", f"₹{preview['inv_80c']:,.0f}", icon="📊")
-            with s2: create_enhanced_metric_card("80D", f"₹{preview['inv_80d']:,.0f}", icon="🏥")
-            with s3: create_enhanced_metric_card("Other Deductions", f"₹{preview['inv_other']:,.0f}", icon="📋")
-            with s4: create_enhanced_metric_card("Exempt Allowances", f"₹{preview['exempt_allowances']:,.0f}", icon="🚗")
+            with s1: create_enhanced_metric_card("80C (cap ₹1.5L)", f"₹{preview['inv_80c']:,.2f}", icon="📊")
+            with s2: create_enhanced_metric_card("80D", f"₹{preview['inv_80d']:,.2f}", icon="🏥")
+            with s3: create_enhanced_metric_card("Other Deductions", f"₹{preview['inv_other']:,.2f}", icon="📋")
+            with s4: create_enhanced_metric_card("Exempt Allowances", f"₹{preview['exempt_allowances']:,.2f}", icon="🚗")
 
             # TDS override & additional tax deductions (live)
-            tds_auto = float(preview['tds_amount'])
-            new_tds = st.number_input("Revised TDS (manual override)", 0.0, step=500.0, value=tds_auto, key=k("tds", i))
+            tds_auto = preview['tds_amount']
+            new_tds = st.number_input("Revised TDS (manual override)", 0.0, step=500.0, value=round(tds_auto, 2), key=k("tds", i))
             addl_tax_ded = st.number_input("Additional Tax Deductions (if any)", 0.0, step=500.0,
-                                           value=float(submission.get('additional_deductions', 0.0)), key=k("addtax", i))
+                                           value=round(float(submission.get('additional_deductions', 0.0)), 2), key=k("addtax", i))
 
-            revised_total_deductions = preview['total_deductions'] - preview['tds_amount'] + new_tds + addl_tax_ded
-            revised_net_payable = preview['total_earnings'] - revised_total_deductions
+            revised_total_deductions = round(preview['total_deductions'] - preview['tds_amount'] + new_tds + addl_tax_ded, 2)
+            revised_net_payable = round(preview['total_earnings'] - revised_total_deductions, 2)
 
-            st.markdown("### 🧮 Revised Calculation Preview")
+            st.markdown("### 🧮 Final Calculation Summary")
             p1, p2, p3, p4 = st.columns(4)
-            with p1: create_enhanced_metric_card("Taxable Income", f"₹{preview['taxable_income']:,.0f}", icon="🧾")
-            with p2: create_enhanced_metric_card("TDS (manual)", f"₹{new_tds:,.0f}", delta=f"{(new_tds-tds_auto):+,.0f}", icon="🏛️")
-            with p3: create_enhanced_metric_card("Total Deductions", f"₹{revised_total_deductions:,.0f}", icon="📉")
-            with p4: create_enhanced_metric_card("Net Payable", f"₹{revised_net_payable:,.0f}", delta=f"{(revised_net_payable - preview['net_payable']):+,.0f}", icon="💼")
+            with p1: create_enhanced_metric_card("Taxable Income", f"₹{preview['taxable_income']:,.2f}", icon="🧾")
+            with p2: 
+                delta_tds = new_tds - tds_auto
+                delta_text = f"{delta_tds:+,.2f}" if delta_tds != 0 else "No change"
+                create_enhanced_metric_card("TDS (Final)", f"₹{new_tds:,.2f}", delta=delta_text, icon="🏛️")
+            with p3: create_enhanced_metric_card("Total Deductions", f"₹{revised_total_deductions:,.2f}", icon="📉")
+            with p4: 
+                delta_net = revised_net_payable - preview['net_payable']
+                delta_net_text = f"{delta_net:+,.2f}" if delta_net != 0 else "No change"
+                create_enhanced_metric_card("Net Payable", f"₹{revised_net_payable:,.2f}", delta=delta_net_text, icon="💼")
 
             # --- Submit section: a form with an actual submit button ---
             with st.form(k("submit_form", i), clear_on_submit=False):
@@ -2503,17 +2587,17 @@ def tax_review_dashboard_updated():
                 submit_btn = st.form_submit_button("📋 Submit Tax Review", use_container_width=True)
 
             if submit_btn:
-                # Persist current widget values
+                # Persist current widget values with proper rounding
                 submission['tax_regime'] = new_tax_regime
-                submission['pt_total'] = pt_edit
+                submission['pt_total'] = round(pt_edit, 2)
 
                 inv_save = dict(preview['investments_data'])
                 inv_save['breakdown'] = inv_dict['breakdown']
                 submission['investments_data'] = inv_save
 
-                submission['taxable_income'] = preview['taxable_income']
-                submission['tds_amount'] = new_tds
-                submission['additional_deductions'] = addl_tax_ded
+                submission['taxable_income'] = round(preview['taxable_income'], 2)
+                submission['tds_amount'] = round(new_tds, 2)
+                submission['additional_deductions'] = round(addl_tax_ded, 2)
                 submission['total_deductions'] = revised_total_deductions
                 submission['net_payable'] = revised_net_payable
 
@@ -2525,7 +2609,7 @@ def tax_review_dashboard_updated():
 
                 save_fnf_data()
                 if decision == "Approve":
-                    st.success("✅ Approved and saved!")
+                    st.success("✅ Tax calculation completed and approved!")
                     st.balloons()
                 else:
                     st.error("❌ Sent back to Payroll for revision.")
