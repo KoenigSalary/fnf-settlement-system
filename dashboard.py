@@ -809,17 +809,68 @@ def extract_epf_profile(emp_row, preferred_epf_col=None, all_cols=None):
     # 3) No fixed value found; compute later via wages/rate/cap
     return profile
 
-def get_total_working_days(month_name, year=None):
+def get_total_working_days(month_name, year=None, holidays=None):
+    """
+    Calculate working days considering:
+    - 5-day work week (Monday-Friday only)
+    - Exclude holidays if provided
+    """
     month_map = {'January':1,'February':2,'March':3,'April':4,'May':5,'June':6,
                  'July':7,'August':8,'September':9,'October':10,'November':11,'December':12}
     m = month_map.get(month_name)
     if year is None:
-        # pick year from last working day if present in session, else current year
         reference = st.session_state.get('last_working_day', date.today())
         year = reference.year if hasattr(reference, 'year') else date.today().year
 
     total_days = calendar.monthrange(year, m)[1]
-    return sum(calendar.weekday(year, m, d) != 6 for d in range(1, total_days+1))  # exclude Sundays
+    
+    # Count only Monday-Friday (weekday 0-4), exclude Saturday(5) and Sunday(6)
+    working_days = sum(1 for d in range(1, total_days+1) 
+                      if calendar.weekday(year, m, d) < 5)  # 0-4 are Mon-Fri
+    
+    # Deduct holidays if provided
+    if holidays:
+        holiday_count = 0
+        for holiday_date in holidays:
+            try:
+                if isinstance(holiday_date, str):
+                    holiday_dt = datetime.strptime(holiday_date, '%Y-%m-%d').date()
+                else:
+                    holiday_dt = holiday_date
+                
+                # Check if holiday falls in this month and is a working day
+                if (holiday_dt.year == year and holiday_dt.month == m and 
+                    calendar.weekday(year, m, holiday_dt.day) < 5):
+                    holiday_count += 1
+            except Exception:
+                continue
+        
+        working_days -= holiday_count
+    
+    return max(working_days, 0)  # Ensure non-negative
+    
+def holiday_input_section(month):
+    """Add holiday input section for each month"""
+    st.markdown("#### 📅 Holidays (Optional)")
+    holidays_text = st.text_area(
+        f"Holidays in {month} (one date per line, format: YYYY-MM-DD)",
+        placeholder="2024-01-26\n2024-01-15",
+        key=f"holidays_{month}",
+        help="Enter holiday dates that should be excluded from working days"
+    )
+    
+    holidays = []
+    if holidays_text.strip():
+        for line in holidays_text.strip().split('\n'):
+            line = line.strip()
+            if line:
+                try:
+                    holiday_date = datetime.strptime(line, '%Y-%m-%d').date()
+                    holidays.append(holiday_date)
+                except ValueError:
+                    st.warning(f"Invalid date format: {line}. Use YYYY-MM-DD format.")
+    
+    return holidays
 
 def _fy_start_year_from_session() -> int:
     """Return 2025 for FY 2025-26, etc., based on last_working_day (or today)."""
@@ -1248,11 +1299,11 @@ def investment_deductions_input(epf_auto: float = 0.0):
     }
 
 def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=None):
-    """Enhanced multi-month salary input with better UI"""
+    """Enhanced multi-month salary input with 5-day week and holiday support"""
     st.markdown("""
     <div class="main-header">
         <h2>💰 Multi-Month Salary Details</h2>
-        <p>Configure salary details for multiple months with automatic calculations</p>
+        <p>Configure salary details for multiple months with 5-day work week and holiday adjustments</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1264,7 +1315,7 @@ def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=
         st.session_state.monthly_salaries = {
             month: {
                 'total_salary': 0.0, 'basic': 0.0, 'hra': 0.0, 'special_allowances': 0.0,
-                'present_days': 0, 'epf': 0.0, 'esi': 0.0
+                'present_days': 0, 'epf': 0.0, 'esi': 0.0, 'holidays': []
             } for month in months
         }
     
@@ -1283,7 +1334,7 @@ def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=
             st.session_state.monthly_salaries = {
                 month: {
                     'total_salary': 0.0, 'basic': 0.0, 'hra': 0.0, 'special_allowances': 0.0,
-                    'present_days': 0, 'epf': 0.0, 'esi': 0.0
+                    'present_days': 0, 'epf': 0.0, 'esi': 0.0, 'holidays': []
                 } for month in months
             }
             st.rerun()
@@ -1308,20 +1359,25 @@ def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=
             </div>
             """, unsafe_allow_html=True)
             
-            # Working days for this month
-            total_working_days = get_total_working_days(month)
+            # Holiday input section
+            holidays = holiday_input_section(month)
+            st.session_state.monthly_salaries[month]['holidays'] = holidays
+            
+            # Working days calculation with holidays
+            total_working_days = get_total_working_days(month, holidays=holidays)
             
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown(f"""
                 <div class="info-card">
-                    <strong>📊 Working Days Information</strong><br>
-                    Total working days: {total_working_days}
+                    <strong>📊 Working Days Information (5-day week)</strong><br>
+                    Total working days: {total_working_days}<br>
+                    Holidays excluded: {len(holidays)}
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Total salary input; default to employee's monthly salary if empty
+                # Total salary input
                 default_total_salary = st.session_state.monthly_salaries[month]['total_salary'] or (employee_monthly_salary or 0.0)
                 total_salary = st.number_input(
                     f"💰 Total Salary (₹)", 
@@ -1581,12 +1637,12 @@ def create_analytics_charts():
             )
             st.plotly_chart(fig_amounts, use_container_width=True)
 
-def fnf_settlement_form():
-    """Enhanced F&F Settlement Form with better styling"""
+def fnf_settlement_form_payroll_only():
+    """F&F Settlement Form for Payroll Team - No tax inputs, includes Gratuity"""
     st.markdown("""
     <div class="main-header">
-        <h1>📋 Full & Final Settlement Form</h1>
-        <p>Comprehensive F&F settlement calculation with tax optimization</p>
+        <h1>📋 Full & Final Settlement Form (Payroll)</h1>
+        <p>Payroll processing - Tax deductions handled by Tax Team</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1673,18 +1729,13 @@ def fnf_settlement_form():
         </div>
         """, unsafe_allow_html=True)
     
-    # Step 2: Enhanced Tax Regime Selection
+    # Step 2: Tax Regime Note (No selection, Tax Team handles this)
     st.markdown("""
-    <div class="employee-card">
-        <h3>🏛️ Step 2: Select Tax Regime</h3>
+    <div class="info-card">
+        <h3>🏛️ Tax Processing Note</h3>
+        <p>📋 Tax regime selection and investment deductions will be handled by the Tax Team during review.</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    tax_regime = st.selectbox(
-        "Tax Regime", 
-        ["Old Tax Regime", "New Tax Regime"],
-        help="Choose between Old Tax Regime (with investment deductions) or New Tax Regime (lower rates, no deductions)"
-    )
     
     # EPF policy for this employee (read from Master)
     epf_profile = extract_epf_profile(employee, preferred_epf_col=chosen_epf_col, all_cols=list(employee_df.columns))
@@ -1701,31 +1752,16 @@ def fnf_settlement_form():
         """, unsafe_allow_html=True)
         return
     
-    # 🔹 Auto EPF (employee share) from F&F months to prefill 80C
-    epf_auto_total = sum(m['epf'] for m in active_months.values()) if active_months else 0.0
-    
-    # Step 4: Investment Options (only for Old Tax Regime)
-    investments_data = {}
-    if tax_regime == "Old Tax Regime":
-        st.markdown("---")
-        investments_data = investment_deductions_input(epf_auto=epf_auto_total)
-    else:
-        st.markdown("""
-        <div class="info-card">
-            📢 <strong>New Tax Regime Selected</strong><br>
-            Investment deductions are not available in the new tax regime
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Step 5: Enhanced Other F&F Details
+    # Step 4: Payroll-Only F&F Details (NO TAX INPUTS OR INVESTMENT DEDUCTIONS)
     st.markdown("""
     <div class="employee-card">
-        <h3>📝 Step 5: Additional F&F Details</h3>
+        <h3>📝 Step 4: Payroll F&F Details</h3>
+        <p>💡 Tax deductions and investment calculations will be handled by Tax Team</p>
     </div>
     """, unsafe_allow_html=True)
 
     # Form for additional details (no buttons inside)
-    with st.form("fnf_additional_details"):
+    with st.form("fnf_payroll_details"):
         col1, col2 = st.columns(2)
 
         with col1:
@@ -1802,7 +1838,7 @@ def fnf_settlement_form():
             leave_encashment = st.number_input("🏖️ Leave Encashment (₹)", value=0.0, min_value=0.0)
 
         with col2:
-            st.markdown("### 📉 Additional Deductions")
+            st.markdown("### 📉 Payroll Deductions Only")
  
             # PT only for Chennai and Bangalore
             pt_enabled = str(employee['BaseLocation']).lower() in ['chennai', 'bangalore']
@@ -1827,15 +1863,24 @@ def fnf_settlement_form():
             notice_period_recovery = st.number_input("⏰ Notice Period Recovery (₹)", value=0.0, min_value=0.0)
             other_deductions = st.number_input("📝 Other Deductions (₹)", value=0.0, min_value=0.0)
 
+            # Information about tax calculation
+            st.markdown("""
+            <div class="info-card">
+                📋 <strong>Tax Calculation Note:</strong><br>
+                • TDS and investment deductions will be calculated by Tax Team<br>
+                • Tax regime selection handled during tax review<br>
+                • This form covers payroll components only
+            </div>
+            """, unsafe_allow_html=True)
+
         # ✅ Submit button MUST be inside this form block
-        calculate_clicked = st.form_submit_button("🧮 Calculate F&F Settlement", use_container_width=True)
+        calculate_clicked = st.form_submit_button("🧮 Calculate Payroll F&F", use_container_width=True)
 
     # Process calculation when form is submitted
     if calculate_clicked:
-        # Store calculation results in session state
+        # Store calculation results in session state (PAYROLL ONLY - NO TAX CALCULATIONS)
         st.session_state.calculation_done = True
         st.session_state.calculation_data = {
-            'tax_regime': tax_regime,
             'resignation_date': resignation_date,
             'last_working_day': last_working_day,
             'gratuity': gratuity,
@@ -1847,12 +1892,11 @@ def fnf_settlement_form():
             'wfh_recovery': wfh_recovery,
             'notice_period_recovery': notice_period_recovery,
             'other_deductions': other_deductions,
-            'investments_data': investments_data,
             'tenure_years': tenure_years,
             'last_basic_da': last_basic_da
         }
 
-    # Enhanced calculation results display
+    # Enhanced calculation results display (PAYROLL VIEW ONLY)
     if st.session_state.get('calculation_done', False):
         data = st.session_state.calculation_data
 
@@ -1867,62 +1911,32 @@ def fnf_settlement_form():
             'total_esi': sum(m['esi'] for m in active_months.values()),
         }
 
-        # ---- Payout view (includes gratuity) ----
+        # ---- Payroll calculation (NO TAX CALCULATIONS HERE) ----
         total_earnings = totals['prorated_total'] + data['gratuity'] + data['bonus'] + data['leave_encashment']
 
-        # ---- Taxable earnings base (gratuity excluded as tax-free u/s 10(10)) ----
-        taxable_earnings = totals['prorated_total'] + data['bonus'] + data['leave_encashment']
-
-        # ---- Payroll deductions (do NOT reduce taxable income) ----
-        # EPF / ESI / Advances / Recoveries reduce payout but not total income for tax
+        # ---- Payroll deductions only ----
         payroll_deductions = (
             totals['total_epf'] + totals['total_esi'] + data['salary_advance'] + data['tada_recovery'] +
             data['wfh_recovery'] + data['notice_period_recovery'] + data['other_deductions']
         )
 
-        # ---- PT is deductible from salary income (u/s 16(iii)) ----
+        # PT deduction
         pt_deduction = float(data.get('pt_total', 0.0) or 0.0)
 
-        # ---- FY helper ----
-        fy_start = _fy_start_year_from_session()
-
-        # ---- TAX CALCULATION ----
-        if data['tax_regime'] == "Old Tax Regime":
-            inv = data.get('investments_data', {}) or {}
-            exempt_allowances = float(inv.get('exempt_allowances', 0.0) or 0.0)
-            investments_total = float(inv.get('total_deductions', 0.0) or 0.0)  # 80C/80D/etc.
-            std_ded = 50_000.0
-
-            # Total income for slab = taxable_earnings - std_ded - exempt_allowances - investments - PT
-            taxable_income = max(
-                0.0,
-                taxable_earnings - std_ded - exempt_allowances - investments_total - pt_deduction
-            )
-            tds_amount = tds_old_from_total_income(taxable_income)
-
-        else:
-            # New Regime ignores investments & exempt allowances; uses FY-appropriate std. deduction; PT allowed
-            std_ded = 75_000.0 if fy_start >= 2025 else 50_000.0
-            taxable_income = max(0.0, taxable_earnings - std_ded - pt_deduction)
-            tds_amount = tds_new_from_total_income(taxable_income)
-
-        taxable_income = max(0.0, taxable_income)  # clamp
-
-        # ---- Totals including TDS ----
-        total_deductions = payroll_deductions + pt_deduction + tds_amount
-        net_payable = total_earnings - total_deductions
+        # Net before tax (Tax Team will calculate final TDS)
+        net_before_tax = total_earnings - payroll_deductions - pt_deduction
 
         # Enhanced results display
         st.markdown("---")
         st.markdown("""
         <div class="main-header">
-            <h2>📊 Full & Final Settlement Summary</h2>
+            <h2>📊 Payroll F&F Summary (Tax Team Review Pending)</h2>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="info-card">
-            🛈 <strong>Important Note:</strong> Gratuity is tax-free (Section 10(10)) and is excluded from taxable income.
+            🛈 <strong>Important Note:</strong> This summary shows payroll components only. Tax calculations and final settlement amount will be determined by Tax Team.
         </div>
         """, unsafe_allow_html=True)
 
@@ -1943,24 +1957,8 @@ def fnf_settlement_form():
         month_df = pd.DataFrame(month_breakdown)
         st.dataframe(month_df, use_container_width=True, hide_index=True)
 
-        # ---- Investment Summary (Old Regime only) ----
-        if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-            with st.expander("💼 Investment & Deduction Details", expanded=False):
-                colx1, colx2, colx3 = st.columns(3)
-                with colx1:
-                    st.markdown("### Section 80C")
-                    create_enhanced_metric_card("Total 80C", f"₹{data['investments_data']['80c_total']:,.0f}", icon="📊")
-                with colx2:
-                    st.markdown("### Other Deductions")
-                    create_enhanced_metric_card("Section 80D", f"₹{data['investments_data']['80d_total']:,.0f}", icon="🏥")
-                    create_enhanced_metric_card("Other", f"₹{data['investments_data']['other_deductions']:,.0f}", icon="📋")
-                with colx3:
-                    st.markdown("### Exempt Allowances")
-                    create_enhanced_metric_card("Total Exempt", f"₹{data['investments_data']['exempt_allowances']:,.0f}", icon="🚗")
-                    create_enhanced_metric_card("Tax Savings", f"₹{data['investments_data']['total_deductions']:,.0f}", icon="💰")
-
-        # ---- Enhanced Overall Summary ----
-        st.markdown("### 💰 Overall F&F Summary")
+        # ---- Enhanced Overall Summary (PAYROLL ONLY) ----
+        st.markdown("### 💰 Payroll F&F Summary")
         colo1, colo2, colo3 = st.columns(3)
 
         with colo1:
@@ -1983,7 +1981,7 @@ def fnf_settlement_form():
         with colo2:
             st.markdown("""
             <div class="warning-card">
-                <h3>📉 DEDUCTIONS</h3>
+                <h3>📉 PAYROLL DEDUCTIONS</h3>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1995,30 +1993,29 @@ def fnf_settlement_form():
             create_enhanced_metric_card("WFH Recovery", f"₹{data['wfh_recovery']:,.2f}", icon="🏠")
             create_enhanced_metric_card("Notice Period", f"₹{data['notice_period_recovery']:,.2f}", icon="⏰")
             create_enhanced_metric_card("Other", f"₹{data['other_deductions']:,.2f}", icon="📝")
-            create_enhanced_metric_card(f"TDS ({data['tax_regime'].split()[0]})", f"₹{tds_amount:,.2f}", icon="🏛️")
             
             st.markdown("---")
-            create_enhanced_metric_card("Total Deductions", f"₹{total_deductions:,.2f}", icon="📉")
+            create_enhanced_metric_card("Total Payroll Deductions", f"₹{payroll_deductions + pt_deduction:,.2f}", icon="📉")
 
         with colo3:
             st.markdown("""
             <div class="info-card">
-                <h3>💼 NET SETTLEMENT</h3>
+                <h3>💼 NET (Before Tax)</h3>
             </div>
             """, unsafe_allow_html=True)
             
-            if net_payable >= 0:
-                create_enhanced_metric_card("Net Payable", f"₹{net_payable:,.2f}", delta="✅ Credit", icon="💰")
-            else:
-                create_enhanced_metric_card("Net Recoverable", f"₹{abs(net_payable):,.2f}", delta="❌ Debit", icon="💸")
-
-            create_enhanced_metric_card("Tax Regime", data['tax_regime'], icon="🏛️")
+            create_enhanced_metric_card("Net Before Tax", f"₹{net_before_tax:,.2f}", delta="Pending Tax Review", icon="💰")
             
-            if data['tax_regime'] == "Old Tax Regime" and data['investments_data']:
-                tax_saved = (data['investments_data']['total_deductions'] * 0.30)  # rough indicator
-                create_enhanced_metric_card("Est. Tax Saved", f"₹{tax_saved:,.0f}", icon="💡")
+            st.markdown("""
+            <div class="warning-card">
+                ⏳ <strong>Next Steps:</strong><br>
+                • Tax Team will calculate TDS<br>
+                • Investment deductions review<br>
+                • Final settlement amount
+            </div>
+            """, unsafe_allow_html=True)
 
-        # ---- Persist submission ----
+        # ---- Persist submission (PAYROLL DATA ONLY) ----
         fnf_data = {
             'employee_id': int(employee['Employee ID']),
             'employee_name': employee['Employee Name'],
@@ -2027,10 +2024,8 @@ def fnf_settlement_form():
             'doj': employee['Date of Joining'],
             'resignation_date': data['resignation_date'].strftime('%d/%m/%Y'),
             'last_working_day': data['last_working_day'].strftime('%d/%m/%Y'),
-            'tax_regime': data['tax_regime'],
             'active_months': active_months,
             'salary_totals': totals,
-            'investments_data': data['investments_data'],
             'gratuity': data['gratuity'],
             'bonus': data['bonus'],
             'leave_encashment': data['leave_encashment'],
@@ -2041,13 +2036,20 @@ def fnf_settlement_form():
             'wfh_recovery': data['wfh_recovery'],
             'notice_period_recovery': data['notice_period_recovery'],
             'other_deductions': data['other_deductions'],
-            'tds_amount': tds_amount,
-            'total_deductions': total_deductions,
-            'net_payable': net_payable,
-            'taxable_income': taxable_income,
+            'payroll_deductions': payroll_deductions,
+            'net_before_tax': net_before_tax,
             'status': 'Pending Tax Review',
             'tenure_years': data['tenure_years'],
-            'last_basic_da': data['last_basic_da']
+            'last_basic_da': data['last_basic_da'],
+            'payroll_calculated': True,
+            'tax_calculated': False,
+            # Tax fields will be populated by Tax Team
+            'tax_regime': None,
+            'investments_data': {},
+            'tds_amount': 0.0,
+            'total_deductions': 0.0,
+            'net_payable': 0.0,
+            'taxable_income': 0.0
         }
 
         if 'fnf_submissions' not in st.session_state:
@@ -2074,7 +2076,7 @@ def fnf_settlement_form():
                 fnf_data['status'] = 'Under Tax Review'
                 st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
                 save_fnf_data()
-                st.success("✅ F&F settlement sent to Tax Team for review!")
+                st.success("✅ Payroll F&F sent to Tax Team for tax calculation and review!")
                 st.balloons()
                 st.session_state.calculation_done = False
                 st.rerun()
@@ -2084,16 +2086,16 @@ def fnf_settlement_form():
                 fnf_data['status'] = 'Draft'
                 st.session_state.fnf_submissions[existing_index if existing_index is not None else -1] = fnf_data
                 save_fnf_data()
-                st.info("💾 F&F settlement saved as draft")
+                st.info("💾 Payroll F&F saved as draft")
                 st.session_state.calculation_done = False
                 st.rerun()
 
         with c3:
-            if st.button("📄 Detailed Report", use_container_width=True):
-                st.info("📄 Comprehensive F&F report with all breakdowns generated!")
+            if st.button("📄 Payroll Report", use_container_width=True):
+                st.info("📄 Payroll F&F report generated! Tax calculations pending.")
 
 # File constants
-FNF_FILE        = "fnf_submissions.json"     # (you already have these)
+FNF_FILE = "fnf_submissions.json"
 FNF_CLOSED_FILE = "fnf_closed.json"
 
 def load_fnf_closed_data():
@@ -2112,10 +2114,11 @@ def save_fnf_closed_data(data):
     except Exception as e:
         st.warning(f"Could not save closed F&F data: {e}")
         
-def recompute_tax(submission: dict, inv: dict, new_regime: str):
+def recompute_tax_updated(submission: dict, inv: dict, new_regime: str):
     """
-    Recompute taxable income, TDS and settlement totals from a tax-team edit.
-    Relies on: _fy_start_year_from_session, tds_old_from_total_income, tds_new_from_total_income.
+    Updated tax computation with New Regime restrictions:
+    - New Regime: Only 80CCD(2) allowed, no other deductions including EPF
+    - Old Regime: All deductions as before
     """
     def _f(x, default=0.0):
         try: return float(x if x is not None else default)
@@ -2133,26 +2136,36 @@ def recompute_tax(submission: dict, inv: dict, new_regime: str):
 
     # Normalize investments
     br = (inv or {}).get('breakdown', {})
-    c80c_keys = ['ppf','epf_employee','elss','life_insurance','fd_5year','nsc','suknya_samriddhi','tuition_fees']
-    inv_80c_uncapped = _sum(br, c80c_keys)
-    inv_80c = min(inv_80c_uncapped, 150000.0)
-
-    inv_80d = _sum(br, ['health_insurance_self','health_insurance_parents'])
-    inv_other = _sum(br, ['section_80dd','section_80ddb','home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2'])
-    exempt_allowances = _sum(br, ['conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'])
-    inv_total_for_old = inv_80c + inv_80d + inv_other
-
+    
     # Standard deduction (FY-aware for New regime)
     fy_start = _fy_start_year_from_session()
     std_deduction = 75_000.0 if (new_regime == "New Tax Regime" and fy_start >= 2025) else 50_000.0
 
-    # Taxable income & TDS by regime
-    if new_regime == "Old Tax Regime":
-        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction - inv_total_for_old - exempt_allowances)
-        tds_amount = tds_old_from_total_income(taxable_income)
-    else:
-        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction)
+    # Regime-specific deduction calculation
+    if new_regime == "New Tax Regime":
+        # NEW REGIME: Only 80CCD(2) allowed
+        inv_80c = 0.0  # No 80C deductions in new regime
+        inv_80d = 0.0  # No 80D deductions in new regime
+        inv_other = _f(br.get('nps_80ccd_2', 0.0))  # Only employer NPS contribution
+        exempt_allowances = 0.0  # No exempt allowances in new regime
+        inv_total_for_tax = inv_other  # Only 80CCD(2)
+        
+        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction - inv_total_for_tax)
         tds_amount = tds_new_from_total_income(taxable_income)
+        
+    else:
+        # OLD REGIME: All deductions allowed
+        c80c_keys = ['ppf','epf_employee','elss','life_insurance','fd_5year','nsc','suknya_samriddhi','tuition_fees']
+        inv_80c_uncapped = _sum(br, c80c_keys)
+        inv_80c = min(inv_80c_uncapped, 150000.0)
+        
+        inv_80d = _sum(br, ['health_insurance_self','health_insurance_parents'])
+        inv_other = _sum(br, ['section_80dd','section_80ddb','home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2'])
+        exempt_allowances = _sum(br, ['conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'])
+        inv_total_for_tax = inv_80c + inv_80d + inv_other
+        
+        taxable_income = max(0.0, taxable_earnings - std_deduction - pt_deduction - inv_total_for_tax - exempt_allowances)
+        tds_amount = tds_old_from_total_income(taxable_income)
 
     # Payroll-side deductions (do not affect taxable income)
     payroll_deductions = (
@@ -2178,18 +2191,29 @@ def recompute_tax(submission: dict, inv: dict, new_regime: str):
     total_deductions = payroll_deductions + pt_deduction + tds_amount
     net_payable = total_earnings - total_deductions
 
-    investments_data = {
-        '80c_total': round(inv_80c, 2),
-        '80d_total': round(inv_80d, 2),
-        'other_deductions': round(inv_other, 2),
-        'exempt_allowances': round(exempt_allowances, 2),
-        'total_deductions': round(inv_total_for_old, 2),  # old-regime use
-        'breakdown': {k: _f(br.get(k, 0.0)) for k in set(c80c_keys + [
-            'health_insurance_self','health_insurance_parents','section_80dd','section_80ddb',
-            'home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2',
-            'conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'
-        ])}
-    }
+    # Build investment data structure
+    if new_regime == "New Tax Regime":
+        investments_data = {
+            '80c_total': 0.0,
+            '80d_total': 0.0,
+            'other_deductions': round(inv_other, 2),
+            'exempt_allowances': 0.0,
+            'total_deductions': round(inv_other, 2),
+            'breakdown': {'nps_80ccd_2': _f(br.get('nps_80ccd_2', 0.0))}
+        }
+    else:
+        investments_data = {
+            '80c_total': round(inv_80c, 2),
+            '80d_total': round(inv_80d, 2),
+            'other_deductions': round(inv_other, 2),
+            'exempt_allowances': round(exempt_allowances, 2),
+            'total_deductions': round(inv_total_for_tax, 2),
+            'breakdown': {k: _f(br.get(k, 0.0)) for k in set(c80c_keys + [
+                'health_insurance_self','health_insurance_parents','section_80dd','section_80ddb',
+                'home_loan_interest','education_loan_interest','nps_80ccd_1b','nps_80ccd_2',
+                'conveyance_allowance','helper_allowance','lta','tel_broadband','ld_allowance','hra_exemption'
+            ])}
+        }
 
     return {
         'regime': new_regime,
@@ -2200,7 +2224,7 @@ def recompute_tax(submission: dict, inv: dict, new_regime: str):
         'inv_80d': round(inv_80d, 2),
         'inv_other': round(inv_other, 2),
         'exempt_allowances': round(exempt_allowances, 2),
-        'inv_total_for_old': round(inv_total_for_old, 2),
+        'inv_total_for_tax': round(inv_total_for_tax, 2),
         'taxable_income': round(taxable_income, 2),
         'tds_amount': round(tds_amount, 2),
         'payroll_deductions': round(payroll_deductions, 2),
@@ -2210,8 +2234,8 @@ def recompute_tax(submission: dict, inv: dict, new_regime: str):
         'investments_data': investments_data,
     }
     
-def tax_review_dashboard():
-    """Tax Review: regime selection, full investments editor, live preview, and a form submit button."""
+def tax_review_dashboard_updated():
+    """Updated Tax Review Dashboard with regime-specific deduction inputs"""
     st.markdown("""
     <div class="main-header">
         <h1>🔍 Tax Review Dashboard</h1>
@@ -2231,7 +2255,6 @@ def tax_review_dashboard():
         st.info("Nothing pending for tax review.")
         return
 
-    # Keys helper to avoid collisions across expanders
     def k(base, idx): return f"{base}_{idx}"
 
     for i, submission in enumerate(review_submissions):
@@ -2245,61 +2268,114 @@ def tax_review_dashboard():
             inv_saved = submission.get('investments_data', {}) or {}
             breakdown_saved = inv_saved.get('breakdown', {})
 
-            st.markdown("### 🏛️ Regime & Investment Inputs (live)")
-            # Regime (outside form → live recompute)
+            st.markdown("### 🏛️ Tax Regime Selection")
+            # Regime selection
             new_tax_regime = st.selectbox(
                 "Tax Regime",
                 ["Old Tax Regime", "New Tax Regime"],
                 index=0 if submission.get('tax_regime') == "Old Tax Regime" else 1,
                 key=k("regime", i)
             )
+            
+            # Show regime-specific information
+            if new_tax_regime == "New Tax Regime":
+                st.markdown("""
+                <div class="warning-card">
+                    ⚠️ <strong>New Tax Regime Restrictions:</strong><br>
+                    • Only 80CCD(2) deduction allowed<br>
+                    • No EPF employee contribution deduction<br>
+                    • No other investment deductions<br>
+                    • No exempt allowances
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="success-card">
+                    ✅ <strong>Old Tax Regime:</strong><br>
+                    • All investment deductions available<br>
+                    • EPF employee contribution deductible<br>
+                    • Exempt allowances applicable
+                </div>
+                """, unsafe_allow_html=True)
 
-            # 80C
-            st.markdown("#### 📊 Section 80C (Max ₹1,50,000)")
-            c80c1, c80c2 = st.columns(2)
-            with c80c1:
-                ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=float(breakdown_saved.get('ppf', 0.0)), key=k("ppf", i))
-                epf_default = breakdown_saved.get('epf_employee')
-                if epf_default is None:
-                    epf_default = float(submission.get('salary_totals', {}).get('total_epf', 0.0))
-                epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=float(epf_default), key=k("epfemp", i))
-                elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=float(breakdown_saved.get('elss', 0.0)), key=k("elss", i))
-                life = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=float(breakdown_saved.get('life_insurance', 0.0)), key=k("life", i))
-            with c80c2:
-                fd5 = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=float(breakdown_saved.get('fd_5year', 0.0)), key=k("fd5", i))
-                nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=float(breakdown_saved.get('nsc', 0.0)), key=k("nsc", i))
-                suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=float(breakdown_saved.get('suknya_samriddhi', 0.0)), key=k("suk", i))
-                tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=float(breakdown_saved.get('tuition_fees', 0.0)), key=k("tuition", i))
+            # Regime-specific input sections
+            if new_tax_regime == "New Tax Regime":
+                # NEW REGIME: Only 80CCD(2)
+                st.markdown("#### 🏦 Available Deductions (New Tax Regime)")
+                nps2 = st.number_input("🏢 NPS 80CCD(2) Employer Contribution", 0.0, step=1000.0, 
+                                       value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
+                
+                # Set all other deductions to 0
+                inv_dict = {
+                    'breakdown': {'nps_80ccd_2': nps2}
+                }
+                
+            else:
+                # OLD REGIME: All deductions
+                st.markdown("#### 📊 Section 80C (Max ₹1,50,000)")
+                c80c1, c80c2 = st.columns(2)
+                with c80c1:
+                    ppf = st.number_input("💰 PPF", 0.0, step=1000.0, value=float(breakdown_saved.get('ppf', 0.0)), key=k("ppf", i))
+                    epf_default = breakdown_saved.get('epf_employee')
+                    if epf_default is None:
+                        epf_default = float(submission.get('salary_totals', {}).get('total_epf', 0.0))
+                    epf_employee = st.number_input("🏦 EPF (Employee)", 0.0, step=100.0, value=float(epf_default), key=k("epfemp", i))
+                    elss = st.number_input("📈 ELSS", 0.0, step=1000.0, value=float(breakdown_saved.get('elss', 0.0)), key=k("elss", i))
+                    life = st.number_input("🛡️ Life Insurance", 0.0, step=500.0, value=float(breakdown_saved.get('life_insurance', 0.0)), key=k("life", i))
+                with c80c2:
+                    fd5 = st.number_input("🏛️ 5-Year FD", 0.0, step=1000.0, value=float(breakdown_saved.get('fd_5year', 0.0)), key=k("fd5", i))
+                    nsc = st.number_input("📜 NSC", 0.0, step=1000.0, value=float(breakdown_saved.get('nsc', 0.0)), key=k("nsc", i))
+                    suk = st.number_input("👧 Sukanya Samriddhi", 0.0, step=1000.0, value=float(breakdown_saved.get('suknya_samriddhi', 0.0)), key=k("suk", i))
+                    tuition = st.number_input("🎓 Tuition Fees", 0.0, step=1000.0, value=float(breakdown_saved.get('tuition_fees', 0.0)), key=k("tuition", i))
 
-            # 80D & Others
-            st.markdown("#### 🏥 Health & Other Deductions")
-            d1, d2 = st.columns(2)
-            with d1:
-                hi_self  = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_self', 0.0)), key=k("hi_self", i))
-                hi_par   = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_parents', 0.0)), key=k("hi_par", i))
-                sec_dd   = st.number_input("♿ 80DD", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80dd', 0.0)), key=k("80dd", i))
-                sec_ddb  = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80ddb', 0.0)), key=k("80ddb", i))
-            with d2:
-                hli      = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=float(breakdown_saved.get('home_loan_interest', 0.0)), key=k("hli", i))
-                eli      = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=float(breakdown_saved.get('education_loan_interest', 0.0)), key=k("eli", i))
-                nps1b    = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_1b', 0.0)), key=k("nps1b", i))
-                nps2     = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
+                # 80D & Others
+                st.markdown("#### 🏥 Health & Other Deductions")
+                d1, d2 = st.columns(2)
+                with d1:
+                    hi_self = st.number_input("👨‍👩‍👧 Self & Family (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_self', 0.0)), key=k("hi_self", i))
+                    hi_par = st.number_input("👴👵 Parents (80D)", 0.0, step=1000.0, value=float(breakdown_saved.get('health_insurance_parents', 0.0)), key=k("hi_par", i))
+                    sec_dd = st.number_input("♿ 80DD", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80dd', 0.0)), key=k("80dd", i))
+                    sec_ddb = st.number_input("🏥 80DDB", 0.0, step=1000.0, value=float(breakdown_saved.get('section_80ddb', 0.0)), key=k("80ddb", i))
+                with d2:
+                    hli = st.number_input("🏠 Home Loan Interest", 0.0, step=5000.0, value=float(breakdown_saved.get('home_loan_interest', 0.0)), key=k("hli", i))
+                    eli = st.number_input("📚 Education Loan Interest", 0.0, step=2000.0, value=float(breakdown_saved.get('education_loan_interest', 0.0)), key=k("eli", i))
+                    nps1b = st.number_input("🏦 NPS 80CCD(1B)", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_1b', 0.0)), key=k("nps1b", i))
+                    nps2 = st.number_input("🏢 NPS 80CCD(2) Employer", 0.0, step=1000.0, value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
 
-            # Exempt allowances (shown for both regimes; applied in Old)
-            st.markdown("#### 🚗 Exempt Allowances")
-            a1, a2 = st.columns(2)
-            with a1:
-                conv    = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=float(breakdown_saved.get('conveyance_allowance', 0.0)), key=k("conv", i))
-                helper  = st.number_input("🏠 Helper", 0.0, step=500.0, value=float(breakdown_saved.get('helper_allowance', 0.0)), key=k("helper", i))
-                lta     = st.number_input("✈️ LTA", 0.0, step=5000.0, value=float(breakdown_saved.get('lta', 0.0)), key=k("lta", i))
-            with a2:
-                tel     = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=float(breakdown_saved.get('tel_broadband', 0.0)), key=k("tel", i))
-                ld      = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=k("ld", i))
-                hra_ex  = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=k("hraex", i))
+                # Exempt allowances
+                st.markdown("#### 🚗 Exempt Allowances")
+                a1, a2 = st.columns(2)
+                with a1:
+                    conv = st.number_input("🚗 Conveyance", 0.0, step=1000.0, value=float(breakdown_saved.get('conveyance_allowance', 0.0)), key=k("conv", i))
+                    helper = st.number_input("🏠 Helper", 0.0, step=500.0, value=float(breakdown_saved.get('helper_allowance', 0.0)), key=k("helper", i))
+                    lta = st.number_input("✈️ LTA", 0.0, step=5000.0, value=float(breakdown_saved.get('lta', 0.0)), key=k("lta", i))
+                with a2:
+                    tel = st.number_input("📞 Telephone/Broadband", 0.0, step=500.0, value=float(breakdown_saved.get('tel_broadband', 0.0)), key=k("tel", i))
+                    ld = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=k("ld", i))
+                    hra_ex = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=k("hraex", i))
+
+                # Build investments dict for OLD regime
+                inv_dict = {
+                    'breakdown': {
+                        'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life,
+                        'fd_5year': fd5, 'nsc': nsc, 'suknya_samriddhi': suk, 'tuition_fees': tuition,
+                        'health_insurance_self': hi_self, 'health_insurance_parents': hi_par,
+                        'section_80dd': sec_dd, 'section_80ddb': sec_ddb,
+                        'home_loan_interest': hli, 'education_loan_interest': eli,
+                        'nps_80ccd_1b': nps1b, 'nps_80ccd_2': nps2,
+                        'conveyance_allowance': conv, 'helper_allowance': helper, 'lta': lta,
+                        'tel_broadband': tel, 'ld_allowance': ld, 'hra_exemption': hra_ex
+                    }
+                }
 
             # PT editable by tax team
             pt_edit = st.number_input("🏛️ PT (u/s 16(iii))", 0.0, step=100.0,
                                       value=float(submission.get('pt_total', 0.0)), key=k("pt", i))
+
+            # Live preview with updated calculation
+            sub_preview = dict(submission)
+            sub_preview['pt_total'] = pt_edit
+            preview = recompute_tax_updated(sub_preview, inv_dict, new_tax_regime)  # Use updated function
 
             # Build investments dict for preview
             inv_dict = {
