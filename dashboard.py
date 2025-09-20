@@ -2525,10 +2525,8 @@ def payroll_dashboard():
 
     # --- Tab 2: F&F Settlement (Payroll flow only; NO tax investments here) ---
     with tab2:
-        # Your fnf_settlement_form() should already be updated to:
-        # - remove investment inputs
-        # - show "Deduction Summary (Payroll)" only
-        fnf_settlement_form()
+        # 🔥 CHANGE THIS LINE:
+        fnf_settlement_form_payroll_only()  # ← Changed from fnf_settlement_form()
 
     # --- Tab 3: F&F Status ---
     with tab3:
@@ -2576,7 +2574,6 @@ def payroll_dashboard():
                             <p><strong>Employee:</strong> {submission['employee_name']}</p>
                             <p><strong>Employee ID:</strong> {submission['employee_id']}</p>
                             <p><strong>Last Working Day:</strong> {submission['last_working_day']}</p>
-                            <p><strong>Tax Regime:</strong> {submission['tax_regime']}</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -2586,13 +2583,20 @@ def payroll_dashboard():
 
                     # Financial summary (no investment display on Payroll view)
                     with col2:
+                        # Show different metrics based on calculation status
+                        if submission.get('tax_calculated', False):
+                            net_amount = submission.get('net_payable', 0)
+                            amount_label = "Net Payable"
+                        else:
+                            net_amount = submission.get('net_before_tax', 0)
+                            amount_label = "Net Before Tax"
+                            
                         st.markdown(f"""
                         <div class="metric-card">
                             <h4>💰 Financial Summary</h4>
                             <p><strong>Status:</strong> {status_badge}</p>
                             <p><strong>Total Earnings:</strong> ₹{submission['total_earnings']:,.2f}</p>
-                            <p><strong>Total Deductions:</strong> ₹{submission['total_deductions']:,.2f}</p>
-                            <p><strong>Net Payable:</strong> ₹{submission['net_payable']:,.2f}</p>
+                            <p><strong>{amount_label}:</strong> ₹{net_amount:,.2f}</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -2618,9 +2622,6 @@ def payroll_dashboard():
                         elif submission['status'] == 'Tax Rejected':
                             if st.button(f"📝 Edit & Resubmit", key=f"edit_{submission['employee_id']}"):
                                 st.info("Go to F&F Settlement tab to edit and resend to Tax Team")
-
-                    # 🚫 Removed: Investment details block on Payroll view.
-                    # Investments & exemptions are editable and summarized on the Tax Review dashboard only.
 
                     # Show tax comments (read-only in payroll)
                     if submission.get('tax_comments'):
@@ -2713,7 +2714,7 @@ def payroll_dashboard():
                 st.info("⚙️ System settings panel ready for configuration")
             if st.button("📋 View Logs", use_container_width=True):
                 st.info("📋 System logs viewer ready for implementation")
-
+                
 def login():
     """Enhanced login page with professional styling for real users"""
     
@@ -3070,13 +3071,12 @@ def main():
     if 'role' in st.session_state:
         add_sidebar_logo()
     
-    # Show appropriate page based on authentication
     if 'role' not in st.session_state:
         login()
     elif st.session_state['role'] == 'Payroll Team':
         payroll_dashboard()
     elif st.session_state['role'] == 'Tax Team':
-        tax_review_dashboard()
+        tax_review_dashboard_updated()  # ← Make sure this matches your function name
     else:
         st.error("Unknown role")
 
