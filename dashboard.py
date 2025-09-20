@@ -1387,14 +1387,27 @@ def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=
                     step=1000.0
                 )
                 
-                # Present days – default to full working days for convenience
-                default_present = st.session_state.monthly_salaries[month]['present_days'] or total_working_days
+                # 🔥 FIX: Present days - ensure default value doesn't exceed max_value
+                saved_present_days = st.session_state.monthly_salaries[month]['present_days']
+                
+                # Calculate safe default value
+                if saved_present_days > 0:
+                    # Use saved value, but ensure it doesn't exceed total_working_days
+                    default_present = min(saved_present_days, total_working_days)
+                else:
+                    # Use total working days as default, but ensure it's not greater than max
+                    default_present = total_working_days
+                
+                # Ensure default_present is within valid range
+                default_present = max(0, min(default_present, total_working_days))
+                
                 present_days = st.number_input(
                     f"📅 Present Days", 
                     min_value=0, 
-                    max_value=total_working_days,
+                    max_value=max(total_working_days, 1),  # Ensure max_value is at least 1
                     value=default_present,
-                    key=f"days_{month}"
+                    key=f"days_{month}",
+                    help=f"Maximum working days for {month}: {total_working_days}"
                 )
             
             with col2:
@@ -1520,6 +1533,69 @@ def enhanced_multi_month_salary_input(employee_monthly_salary=None, epf_profile=
             create_enhanced_metric_card("Avg Full-Month EPF (Master)", f"₹{avg_full_master:,.0f}", icon="📋")
     
     return active_months
+
+def holiday_input_section(month):
+    """Add holiday input section for each month"""
+    st.markdown("#### 📅 Holidays (Optional)")
+    holidays_text = st.text_area(
+        f"Holidays in {month} (one date per line, format: YYYY-MM-DD)",
+        placeholder="2024-01-26\n2024-01-15",
+        key=f"holidays_{month}",
+        help="Enter holiday dates that should be excluded from working days"
+    )
+    
+    holidays = []
+    if holidays_text.strip():
+        for line in holidays_text.strip().split('\n'):
+            line = line.strip()
+            if line:
+                try:
+                    holiday_date = datetime.strptime(line, '%Y-%m-%d').date()
+                    holidays.append(holiday_date)
+                except ValueError:
+                    st.warning(f"Invalid date format: {line}. Use YYYY-MM-DD format.")
+    
+    return holidays
+
+def get_total_working_days(month_name, year=None, holidays=None):
+    """
+    Calculate working days considering:
+    - 5-day work week (Monday-Friday only)
+    - Exclude holidays if provided
+    """
+    month_map = {'January':1,'February':2,'March':3,'April':4,'May':5,'June':6,
+                 'July':7,'August':8,'September':9,'October':10,'November':11,'December':12}
+    m = month_map.get(month_name)
+    if year is None:
+        reference = st.session_state.get('last_working_day', date.today())
+        year = reference.year if hasattr(reference, 'year') else date.today().year
+
+    total_days = calendar.monthrange(year, m)[1]
+    
+    # Count only Monday-Friday (weekday 0-4), exclude Saturday(5) and Sunday(6)
+    working_days = sum(1 for d in range(1, total_days+1) 
+                      if calendar.weekday(year, m, d) < 5)  # 0-4 are Mon-Fri
+    
+    # Deduct holidays if provided
+    if holidays:
+        holiday_count = 0
+        for holiday_date in holidays:
+            try:
+                if isinstance(holiday_date, str):
+                    holiday_dt = datetime.strptime(holiday_date, '%Y-%m-%d').date()
+                else:
+                    holiday_dt = holiday_date
+                
+                # Check if holiday falls in this month and is a working day
+                if (holiday_dt.year == year and holiday_dt.month == m and 
+                    calendar.weekday(year, m, holiday_dt.day) < 5):
+                    holiday_count += 1
+            except Exception:
+                continue
+        
+        working_days -= holiday_count
+    
+    return max(working_days, 0)  # Ensure non-negative
 
 def load_fnf_data():
     """Load F&F submissions from JSON file into session_state.fnf_submissions"""
