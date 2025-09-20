@@ -2374,6 +2374,15 @@ def tax_review_dashboard_updated():
                 </div>
                 """, unsafe_allow_html=True)
 
+            # 🔥 Initialize all variables first to avoid UnboundLocalError
+            # Initialize all variables with default values
+            ppf = elss = life = fd5 = nsc = suk = tuition = 0.0
+            hi_self = hi_par = sec_dd = sec_ddb = 0.0
+            hli = eli = nps1b = 0.0
+            conv = helper = lta = tel = ld = hra_ex = 0.0
+            epf_employee = 0.0
+            nps2 = 0.0
+
             # Regime-specific input sections
             if new_tax_regime == "New Tax Regime":
                 # NEW REGIME: Only 80CCD(2)
@@ -2381,9 +2390,19 @@ def tax_review_dashboard_updated():
                 nps2 = st.number_input("🏢 NPS 80CCD(2) Employer Contribution", 0.0, step=1000.0, 
                                        value=float(breakdown_saved.get('nps_80ccd_2', 0.0)), key=k("nps2", i))
                 
-                # Set all other deductions to 0
+                # Create investment dict for NEW regime (only NPS 80CCD(2))
                 inv_dict = {
-                    'breakdown': {'nps_80ccd_2': nps2}
+                    'breakdown': {
+                        'nps_80ccd_2': nps2,
+                        # All other fields set to 0
+                        'ppf': 0.0, 'epf_employee': 0.0, 'elss': 0.0, 'life_insurance': 0.0,
+                        'fd_5year': 0.0, 'nsc': 0.0, 'suknya_samriddhi': 0.0, 'tuition_fees': 0.0,
+                        'health_insurance_self': 0.0, 'health_insurance_parents': 0.0,
+                        'section_80dd': 0.0, 'section_80ddb': 0.0,
+                        'home_loan_interest': 0.0, 'education_loan_interest': 0.0, 'nps_80ccd_1b': 0.0,
+                        'conveyance_allowance': 0.0, 'helper_allowance': 0.0, 'lta': 0.0,
+                        'tel_broadband': 0.0, 'ld_allowance': 0.0, 'hra_exemption': 0.0
+                    }
                 }
                 
             else:
@@ -2430,7 +2449,7 @@ def tax_review_dashboard_updated():
                     ld = st.number_input("📚 L&D Allowance", 0.0, step=1000.0, value=float(breakdown_saved.get('ld_allowance', 0.0)), key=k("ld", i))
                     hra_ex = st.number_input("🏠 HRA Exemption", 0.0, step=2000.0, value=float(breakdown_saved.get('hra_exemption', 0.0)), key=k("hraex", i))
 
-                # Build investments dict for OLD regime
+                # Create investment dict for OLD regime (all deductions)
                 inv_dict = {
                     'breakdown': {
                         'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life,
@@ -2451,26 +2470,7 @@ def tax_review_dashboard_updated():
             # Live preview with updated calculation
             sub_preview = dict(submission)
             sub_preview['pt_total'] = pt_edit
-            preview = recompute_tax_updated(sub_preview, inv_dict, new_tax_regime)  # Use updated function
-
-            # Build investments dict for preview
-            inv_dict = {
-                'breakdown': {
-                    'ppf': ppf, 'epf_employee': epf_employee, 'elss': elss, 'life_insurance': life,
-                    'fd_5year': fd5, 'nsc': nsc, 'suknya_samriddhi': suk, 'tuition_fees': tuition,
-                    'health_insurance_self': hi_self, 'health_insurance_parents': hi_par,
-                    'section_80dd': sec_dd, 'section_80ddb': sec_ddb,
-                    'home_loan_interest': hli, 'education_loan_interest': eli,
-                    'nps_80ccd_1b': nps1b, 'nps_80ccd_2': nps2,
-                    'conveyance_allowance': conv, 'helper_allowance': helper, 'lta': lta,
-                    'tel_broadband': tel, 'ld_allowance': ld, 'hra_exemption': hra_ex
-                }
-            }
-
-            # Live preview: clone submission with PT tweak
-            sub_preview = dict(submission)
-            sub_preview['pt_total'] = pt_edit
-            preview = recompute_tax(sub_preview, inv_dict, new_tax_regime)
+            preview = recompute_tax_updated(sub_preview, inv_dict, new_tax_regime)
 
             # Summary cards (live)
             st.markdown("### 📋 Investment & Deduction Summary")
@@ -2521,6 +2521,7 @@ def tax_review_dashboard_updated():
                 submission['tax_reviewed_by'] = st.session_state.get('username', 'Tax Team')
                 submission['tax_review_date'] = datetime.now().strftime('%d/%m/%Y %H:%M')
                 submission['status'] = 'Tax Approved' if decision == "Approve" else 'Tax Rejected'
+                submission['tax_calculated'] = True
 
                 save_fnf_data()
                 if decision == "Approve":
